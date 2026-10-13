@@ -8,7 +8,7 @@
   Turn flat 360° panoramas and ordinary photos into explorable 3D in the browser.<br>
   An AI depth map rebuilds the image as geometry: parallax on a phone, a desktop, with head tracking or in a VR headset,<br>
   3D models standing on real depth, measuring, and stereo, 360° and video export.<br>
-  <sub>AI models: <a href="https://github.com/Insta360-Research-Team/DA360">DA360</a> for 360° depth, <a href="https://github.com/DepthAnything/Depth-Anything-V2">Depth Anything V2</a> for photo depth, <a href="https://github.com/Picsart-AI-Research/MI-GAN">MI-GAN</a> for the background behind objects.</sub>
+  <sub>AI models: <a href="https://github.com/Insta360-Research-Team/DA360">DA360</a> for 360° depth, <a href="https://github.com/DepthAnything/Depth-Anything-V2">Depth Anything  V2</a> for photo depth, <a href="https://github.com/Picsart-AI-Research/MI-GAN">MI-GAN</a> for the background behind objects.</sub>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 | | 360° panoramas | Photos |
 |---|---|---|
 | **Input** | Equirectangular 2:1, or 1:1 / 4:1 stereo | Any aspect ratio |
-| **Depth** | Your depth map, [DA360](https://github.com/Insta360-Research-Team/DA360) on the GPU server, or estimated from a stereo pair | Your depth map, [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) on the GPU server or in the browser |
+| **Depth** | Depth map, [DA360](https://github.com/Insta360-Research-Team/DA360) on the GPU server, or estimated from a stereo pair | Your depth map, [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) on the GPU server or in the browser |
 | **Viewing** | Look around and shift the viewpoint: drag, device tilt, head tracking through the front camera | A window with parallax: drag, tilt, head tracking or an automatic orbit |
 | **3D objects** | Place GLB, OBJ, FBX, USDZ, PLY, LAS and more on the real surface, with occlusion, shadows and labels; slide over the surface, move freely or drop with gravity | Same, in the photo's relative space |
 | **Untextured models** | Studio looks (clay, porcelain, bronze, jade), technical, toon, X-ray, normals and height styles, plus shading cues (rim light, sky and ground tint, cavities) | Same |
@@ -94,10 +94,10 @@ Use `--data /path/to/library` to keep images outside the repository and `--no-mo
 
 - **Open an image**: choose *360° panorama* or *Photo*, load an image (or drop or paste it), optionally a depth map, and press **View in 3D**. With an AI engine available the depth map is generated automatically; **Generate** creates it right away so you can download it.
 - **Look and move**: drag, tilt the phone or turn on **Head** (front-camera head tracking). **Move** sets how far the viewpoint travels.
-- **Photos**: **Depth** sets how deep the scene is, **Focus** which plane stays still, **Orbit** starts the classic 3D-photo sweep, **Fit / Fill** frames the photo.
+- **Photos**: **Depth** sets how deep the scene is, **Focus** which plane stays still, **Orbit** starts the classic 3D photo sweep, **Fit / Fill** frames the photo.
 - **3D objects** (panoramas and photos): **Objects** opens the editor: add a model, slide it over the floor (*Surface*), move it freely (*Free*) or let it fall to the floor when released (*Gravity*), set its distance and height, pick a style, add a shadow, a label or an animation, then export a `.zip` that unpacks straight into the site.
 - **Depth**: overlays that show the rebuilt depth (grey, colour, contours, slice, normals, fog) and **Measure distance**.
-- **Export**: the current view as an image (up to 4K), a stereo pair or an anaglyph, a 360° panorama (mono or omni-directional stereo) with the objects composited in, a video loop, or the depth map.
+- **Export**: the current view as an image, a stereo pair or an anaglyph, a 360° panorama (mono or omni-directional stereo) with the objects composited in, a video loop, or the depth map.
 - **Headset**: a link and a QR code that open the current scene in a VR headset with the chosen view mode, scale and quality. On a nomono3d server local files and the scene are uploaded to the library first.
 - **⌘K / Ctrl+K**: command palette for every action and library item; single-key shortcuts are listed in the help.
 - **Links**: `?p=name` opens an item, `?mode=photo` starts in photo mode, `?kiosk` disables editing for exhibitions, `?vr=1&vm=6dof|stereo|flat&vs=1&vq=std|sharp|max&obj=0` set up VR (the headset link writes these for you).
@@ -199,4 +199,4 @@ The demo atrium, its photos and the sculpture model were made for this project i
 
 ## Licence
 
-[MIT](LICENSE) © 2026 Yevhenii Khan and the nomono3d contributors.
+[MIT](LICENSE) © 2026 Yevhenii Khan and the nomono3d contributors (Oleksandr Soshenskyi).
