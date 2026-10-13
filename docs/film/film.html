@@ -1,0 +1,715 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>nomono3d film</title>
+<link rel="stylesheet" href="plex.css">
+<style>html,body{margin:0;background:#111}canvas{display:block;width:960px;height:540px}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/* nomono3d explainer film. render(t) draws the frame at time t (seconds); capture.cjs steps
+   through it frame by frame. Fine line drawing for the problem, flat colour once depth arrives. */
+const W = 1920, H = 1080, DUR = 82.5;
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+
+/* ── palette and type ── */
+const C = {
+  paper: '#F2F2EE', ink: '#1B2120', ink2: '#5C6663', ink3: '#A9B0AC', rule: '#D5D9D5',
+  sky0: '#CFE1E4', sky1: '#EAF1EF', haze: '#E3ECE9', farF: '#BCD0C6',
+  crown: '#4F8268', crown2: '#3E6E57', crownL: '#6E9E82', bark: '#B4724A', barkD: '#8A5334',
+  ground: '#E4DABD', ground2: '#D3C69F', grass: '#9AA46B',
+  mint: '#2FB38E', mintL: '#5CD2B0', amber: '#F0B23E', slate: '#2E3B42',
+  wood: '#D9B07A', woodS: '#B98C55', woodT: '#E8C795', dark: '#0C0E0D'
+};
+const FONT = '"IBM Plex Sans", system-ui, sans-serif';
+
+/* ── maths ── */
+const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const io = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;      // ease in-out
+const out3 = x => 1 - Math.pow(1 - x, 3);
+const ease = (t, a, b) => io(seg(t, a, b));
+const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+const noise = x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return lerp(hash(i), hash(i + 1), u); };
+function hex(c) { const v = parseInt(c.slice(1), 16); return [v >> 16, (v >> 8) & 255, v & 255]; }
+function mix(a, b, t) { const A = hex(a), B = hex(b); return `rgb(${lerp(A[0], B[0], t) | 0},${lerp(A[1], B[1], t) | 0},${lerp(A[2], B[2], t) | 0})`; }
+
+/* ── geometry as dense polylines ── */
+function bez(p0, p1, p2, p3, n = 28) {
+  const o = [];
+  for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; o.push([u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0], u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]]); }
+  return o;
+}
+const ell = (cx, cy, rx, ry, a0 = 0, a1 = Math.PI * 2, n = 72) => Array.from({ length: n + 1 }, (_, i) => { const a = lerp(a0, a1, i / n); return [cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]; });
+function rrect(x, y, w, h, r, n = 8) {
+  const p = [], arc = (cx, cy, a0) => { for (let i = 0; i <= n; i++) { const a = a0 + i / n * Math.PI / 2; p.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } };
+  arc(x + w - r, y + r, -Math.PI / 2); arc(x + w - r, y + h - r, 0); arc(x + r, y + h - r, Math.PI / 2); arc(x + r, y + r, Math.PI); p.push(p[0]); return p;
+}
+/* a soft cloud-like clump with a flatter underside (pine crowns) */
+function clump(cx, cy, rx, ry, seed, n = 56) {
+  const o = [];
+  for (let i = 0; i <= n; i++) {
+    const a = i / n * Math.PI * 2, k = 1 + 0.10 * Math.sin(a * 4 + seed) + 0.06 * Math.sin(a * 7 + seed * 1.7);
+    let y = cy + Math.sin(a) * ry * k;
+    if (Math.sin(a) > 0) y = cy + Math.sin(a) * ry * k * 0.55;
+    o.push([cx + Math.cos(a) * rx * k, y]);
+  }
+  return o;
+}
+function cut(pts, p) {
+  if (p >= 1) return pts; if (p <= 0) return [];
+  let L = 0; const d = [0];
+  for (let i = 1; i < pts.length; i++) { L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); d.push(L); }
+  const e = L * p, o = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    if (d[i] <= e) { o.push(pts[i]); continue; }
+    const f = (e - d[i - 1]) / ((d[i] - d[i - 1]) || 1);
+    o.push([lerp(pts[i - 1][0], pts[i][0], f), lerp(pts[i - 1][1], pts[i][1], f)]); break;
+  }
+  return o;
+}
+function path(pts) { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); }
+function line(pts, p = 1, w = 2.2, col = C.ink, a = 1, dash) {
+  const q = cut(pts, p); if (q.length < 2 || a <= 0) return;
+  g.save(); g.globalAlpha *= a; g.strokeStyle = col; g.lineWidth = w; g.lineCap = 'round'; g.lineJoin = 'round';
+  if (dash) g.setLineDash(dash);
+  path(q); g.stroke(); g.restore();
+}
+function fillp(pts, col, a = 1) { if (a <= 0.002) return; g.save(); g.globalAlpha *= a; g.fillStyle = col; path(pts); g.closePath(); g.fill(); g.restore(); }
+function text(s, x, y, size, weight = 400, col = C.ink, a = 1, opts = {}) {
+  if (a <= 0) return;
+  g.save(); g.globalAlpha *= a; g.fillStyle = col; g.font = `${weight} ${size}px ${FONT}`; g.textBaseline = 'alphabetic';
+  if (opts.track) g.letterSpacing = opts.track + 'px';
+  if (opts.align) g.textAlign = opts.align;
+  g.fillText(s, x, y); g.restore();
+}
+
+/* ── state ── */
+let T = 0, COL = 0;         // time; colour amount (0 line drawing … 1 flat colour)
+
+/* ═════════ illustration parts ═════════ */
+/* Scots pine in line (and optional colour): tall trunk, a few flat-bottomed clumps at the top.
+   fillCol hides what is behind it, so overlapping trees read cleanly. */
+function pine(x, gy, h, seed, p = 1, o = {}) {
+  const lw = o.w ?? Math.max(1.2, h * 0.0042), ink = o.ink || C.ink, ia = o.a ?? 1, col = o.col ?? COL;
+  const lean = (hash(seed) - 0.5) * h * 0.05, w0 = h * 0.016, w1 = h * 0.007, top = gy - h * 0.86;
+  const tx = x + lean;
+  const L = bez([x - w0, gy], [x - w0, gy - h * 0.4], [tx - w1 - lean * 0.2, top + h * 0.2], [tx - w1, top]);
+  const R = bez([x + w0, gy], [x + w0, gy - h * 0.4], [tx + w1 - lean * 0.2, top + h * 0.2], [tx + w1, top]);
+  const clumps = [];
+  const nc = 3 + (hash(seed + 2) > 0.5 ? 1 : 0);
+  for (let i = 0; i < nc; i++) {
+    const s = seed * 13 + i;
+    const cx = tx + (hash(s) - 0.5) * h * 0.2, cy = top + (hash(s + 1) - 0.4) * h * 0.11 - i * h * 0.02;
+    clumps.push(clump(cx, cy, h * (0.07 + hash(s + 2) * 0.05), h * (0.04 + hash(s + 3) * 0.02), s));
+  }
+  const bark = o.bark || C.bark, crown = o.crown || C.crown, paper = o.paper || C.paper;
+  const fillT = mix(paper, bark, col), fillC = i => mix(paper, i % 2 ? crown : (o.crown2 || C.crown2), col);
+  if (p > 0.02) fillp([...L, ...R.slice().reverse()], fillT, Math.min(1, p * 3) * (o.fa ?? 1));
+  line(L, seg(p, 0, 0.55), lw, ink, ia * (1 - 0.45 * col));
+  line(R, seg(p, 0.05, 0.6), lw, ink, ia * (1 - 0.45 * col));
+  // branch stubs
+  for (let k = 0; k < 2; k++) {
+    const by = top + h * (0.08 + 0.08 * k), sgn = k ? 1 : -1;
+    line([[tx + sgn * w1, by], [tx + sgn * h * 0.05, by - h * 0.03]], seg(p, 0.5, 0.65), lw * 0.85, ink, ia * (1 - 0.45 * col));
+  }
+  clumps.forEach((c, i) => {
+    const cp = seg(p, 0.55 + i * 0.08, 0.85 + i * 0.05);
+    if (cp > 0) fillp(c, fillC(i), Math.min(1, cp * 4) * (o.fa ?? 1));
+    line(c, cp, lw, ink, ia * (1 - 0.45 * col));
+  });
+}
+/* a hiker in the same line style as the trees: limbs are tapered capsules, each filled with
+   paper (so overlaps read cleanly) and outlined in ink. Side view, facing right. */
+function capsule(a, b, r0, r1) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+  const base = Math.atan2(dx / L, -dy / L), o = [];          // direction of the normal (-uy, ux)
+  for (let i = 0; i <= 12; i++) { const t = base + i / 12 * Math.PI; o.push([a[0] + Math.cos(t) * r0, a[1] + Math.sin(t) * r0]); }
+  for (let i = 0; i <= 12; i++) { const t = base + Math.PI + i / 12 * Math.PI; o.push([b[0] + Math.cos(t) * r1, b[1] + Math.sin(t) * r1]); }
+  o.push(o[0]); return o;
+}
+function part(pts, s, fillCol, a = 1) { fillp(pts, fillCol || C.paper, a); line(pts, 1, 2.3 * Math.max(0.8, s), C.ink, a); }
+function hiker(x, fy, s, o = {}) {
+  const a = o.a ?? 1; if (a <= 0) return;
+  const pose = o.pose || 'stand', ph = o.ph || 0;
+  const pol = (p, len, ang) => [p[0] + Math.sin(ang) * len * s, p[1] + Math.cos(ang) * len * s];
+  let hip = [x, fy - 118 * s], sh = [x + 6 * s, fy - 198 * s];
+  let legs, arms;
+  if (pose === 'walk') {
+    const L = q => [0.36 * Math.sin(q), 0.06 + 0.62 * Math.max(0, Math.sin(q - 0.9))];
+    legs = [L(ph + Math.PI), L(ph)]; arms = [[-0.38 * Math.sin(ph + Math.PI), 0.35], [-0.38 * Math.sin(ph), 0.35]];
+    hip[1] -= Math.abs(Math.cos(ph)) * 3 * s; sh[1] -= Math.abs(Math.cos(ph)) * 3 * s;
+  } else if (pose === 'operate') {
+    legs = [[-0.1, 0.06], [0.16, 0.06]]; arms = [[1.05, 0.55], [1.25, 0.35]];
+  } else if (pose === 'sit') {
+    hip = [x, fy - 86 * s]; sh = [x + 10 * s, fy - 166 * s];
+    legs = [[Math.PI / 2 - 0.05, Math.PI / 2 - 0.15], [Math.PI / 2 + 0.05, Math.PI / 2 + 0.05]]; arms = [[1.0, 0.55], [1.15, 0.45]];
+  } else { legs = [[-0.06, 0.05], [0.07, 0.05]]; arms = [[0.08, 0.25], [-0.05, 0.2]]; }
+  const leg = ([th, bend]) => { const k = pol(hip, 60, th), an = pol(k, 58, th - bend); return { k, an, toe: [an[0] + 24 * s, an[1] + 2 * s] }; };
+  const arm = ([th, bend]) => { const e = pol(sh, 52, th), w = pol(e, 47, th + bend); return { e, w }; };
+  const back = { leg: leg(legs[0]), arm: arm(arms[0]) }, front = { leg: leg(legs[1]), arm: arm(arms[1]) };
+  const jacket = o.jacket || C.paper, trousers = o.trousers || C.paper, lw = 2.3 * Math.max(0.8, s);
+  // Parts of one group are outlined together: thick strokes first, then all fills on top, so the
+  // group reads as one silhouette (no visible joints).
+  const group = parts => {
+    g.save(); g.globalAlpha *= a; g.strokeStyle = C.ink; g.lineWidth = lw * 2; g.lineJoin = 'round';
+    for (const [pts] of parts) { path(pts); g.closePath(); g.stroke(); }
+    for (const [pts, col] of parts) { g.fillStyle = col; path(pts); g.closePath(); g.fill(); }
+    g.restore();
+  };
+  const legParts = (l, col) => [[capsule(hip, l.k, 10.5 * s, 8.5 * s), col], [capsule(l.k, l.an, 8.5 * s, 6.5 * s), col], [capsule([l.an[0] - 3 * s, l.an[1] + 1 * s], l.toe, 6.5 * s, 5 * s), C.paper]];
+  const armParts = (r, col) => [[capsule(sh, r.e, 8 * s, 6.8 * s), col], [capsule(r.e, r.w, 6.8 * s, 5.4 * s), col]];
+  const head = [sh[0] + 6 * s, sh[1] - 34 * s];
+  group(armParts(back.arm, jacket));
+  group(legParts(back.leg, trousers));
+  group([[rrect(sh[0] - 42 * s, sh[1] + 2 * s, 32 * s, 68 * s, 11 * s, 4), C.paper]]);
+  group([[capsule(hip, sh, 17 * s, 19 * s), jacket], ...legParts(front.leg, trousers),
+    [capsule([sh[0] + 2 * s, sh[1] - 6 * s], [head[0] - 2 * s, head[1] + 10 * s], 6 * s, 6 * s), C.paper],
+    [ell(head[0], head[1], 17 * s, 19 * s, 0, Math.PI * 2, 40), C.paper]]);
+  // jacket hem and a collar line give the torso some form
+  line([[hip[0] - 16 * s, hip[1] - 4 * s], [hip[0] + 16 * s, hip[1] - 2 * s]], 1, lw * 0.8, C.ink, a * 0.8);
+  const cap = [...ell(head[0], head[1] - 2 * s, 18 * s, 15 * s, Math.PI, Math.PI * 2, 20), [head[0] + 30 * s, head[1] - 4 * s], [head[0] - 18 * s, head[1] - 2 * s]];
+  group([[cap, o.capCol || C.paper]]);
+  if (o.headset) group([[rrect(head[0] - 2 * s, head[1] - 9 * s, 26 * s, 18 * s, 6 * s, 4), C.paper]]);
+  group(armParts(front.arm, jacket));
+  return { head, hand: front.arm.w };
+}
+
+/* tripod with a two-lens 360° camera */
+function tripod(x, gy, s, p = 1) {
+  const top = [x, gy - 150 * s];
+  line([top, [x - 46 * s, gy]], seg(p, 0, 0.35), 2.4);
+  line([top, [x + 48 * s, gy]], seg(p, 0.1, 0.45), 2.4);
+  line([top, [x + 6 * s, gy + 4 * s]], seg(p, 0.2, 0.55), 2.4);
+  line([top, [x, top[1] - 26 * s]], seg(p, 0.45, 0.6), 2.4);
+  const body = rrect(x - 13 * s, top[1] - 86 * s, 26 * s, 62 * s, 12 * s);
+  if (p > 0.55) fillp(body, mix(C.paper, C.slate, COL), seg(p, 0.55, 0.7));
+  line(body, seg(p, 0.55, 0.85), 2.4);
+  const lens = ell(x, top[1] - 62 * s, 8 * s, 8 * s, 0, Math.PI * 2, 24);
+  line(lens, seg(p, 0.8, 1), 2.2);
+  return [x, top[1] - 62 * s];
+}
+
+/* ── the forest of scene 1 (also seen through the headset in scene 3) ── */
+const FOREST = (() => {
+  const t = [];
+  for (let i = 0; i < 9; i++) t.push({ x: 140 + i * 205 + (hash(i) - 0.5) * 70, h: 300 + hash(i + 9) * 60, s: 10 + i, layer: 0 });
+  for (let i = 0; i < 7; i++) t.push({ x: 60 + i * 300 + (hash(i + 40) - 0.5) * 90, h: (i < 3 ? 400 : 470) + hash(i + 50) * 60, s: 30 + i, layer: 1 });
+  t.push({ x: 1860, h: 900, s: 62, layer: 2 }, { x: 1600, h: 800, s: 63, layer: 2 });
+  return t;
+})();
+function forest2D(gy, p, ox = 0, sc = 1, o = {}) {
+  // layers back to front; each layer shifts by its own amount (ox: parallax), or not at all (flat)
+  for (const L of [0, 1, 2]) {
+    const k = o.flat ? 1 : [0.25, 0.55, 1][L];
+    const ink = L === 0 ? C.ink3 : L === 1 ? C.ink2 : C.ink;
+    FOREST.filter(t => t.layer === L).forEach((t, i) => {
+      const yy = gy - [26, 12, -40][L] * sc;
+      pine(t.x * sc + ox * k, yy, t.h * sc, t.s, seg(p, 0.1 + L * 0.18 + i * 0.05, 0.6 + L * 0.18 + i * 0.05), { ink, w: [1.3, 1.7, 2.3][L] * sc });
+    });
+  }
+}
+
+/* ── equirectangular strip ── */
+const STRIP = Array.from({ length: 26 }, (_, i) => ({ u: (i + 0.5) / 26 + (hash(i * 3.3) - 0.5) * 0.025, d: hash(i * 7.7 + 1), s: 200 + i }));
+function strip(x, y, w, h, p, mode = {}) {
+  // mode.depth: 0…1 grey depth map; colour follows COL
+  const hy = y + h * 0.58;
+  if (COL > 0) {
+    const gr = g.createLinearGradient(0, y, 0, hy); gr.addColorStop(0, C.sky0); gr.addColorStop(1, C.sky1);
+    g.save(); g.globalAlpha *= COL; g.fillStyle = gr; g.fillRect(x, y, w, hy - y); g.restore();
+    fillp([[x, hy], [x + w, hy], [x + w, y + h], [x, y + h]], C.ground, COL);
+  }
+  if (mode.depth > 0) {
+    const gr = g.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, '#0E0F0F'); gr.addColorStop(0.58, '#3A3D3C'); gr.addColorStop(1, '#C9CCCB');
+    g.save(); g.globalAlpha *= mode.depth; g.fillStyle = gr; g.fillRect(x, y, w, h); g.restore();
+  }
+  line([[x, hy], [x + w, hy]], seg(p, 0.15, 0.5), 1.4, C.ink2, 1 - 0.5 * COL);
+  STRIP.forEach((t, i) => {
+    const tx = x + t.u * w, hh = h * (0.34 + 0.5 * t.d), gy = hy + h * 0.32 * t.d;
+    if (mode.depth > 0) {
+      const v = Math.round(lerp(70, 250, t.d));
+      fillp([[tx - 2 - t.d * 5, gy], [tx + 2 + t.d * 5, gy], [tx + 1.5, gy - hh * 0.86], [tx - 1.5, gy - hh * 0.86]], `rgb(${v},${v},${v})`, mode.depth);
+      fillp(clump(tx, gy - hh * 0.86, hh * 0.13, hh * 0.06, t.s), `rgb(${v},${v},${v})`, mode.depth);
+      if (COL > 0) pine(tx, gy, hh, t.s, 1, { w: 1.3, fa: COL, a: COL });    // colour takes over from the depth map
+    } else pine(tx, gy, hh, t.s, seg(p, 0.25 + i * 0.012, 0.6 + i * 0.012), { w: 1.3, ink: t.d < 0.4 ? C.ink2 : C.ink, paper: mode.paper });
+  });
+  line(rrect(x, y, w, h, 4, 2), seg(p, 0, 0.3), 1.8, C.ink, 1);
+}
+
+/* ── wireframe sphere (panorama sphere) ── */
+function sphere(cx, cy, r, rot, p, o = {}) {
+  const tilt = 0.32, ct = Math.cos(tilt), st = Math.sin(tilt);
+  const proj = (lat, lon) => { const x = Math.cos(lat) * Math.sin(lon + rot), y = Math.sin(lat), z = Math.cos(lat) * Math.cos(lon + rot); const y2 = y * ct - z * st, z2 = y * st + z * ct; return [cx + x * r, cy - y2 * r, z2]; };
+  const draw = (pts, i) => {
+    let front = [], back = [];
+    const flush = () => { if (front.length > 1) line(front, p, 1.6, o.ink || C.ink, 0.9); if (back.length > 1) line(back, p, 1.2, C.ink3, 0.6); front = []; back = []; };
+    let side = null;
+    for (const q of pts) { const s = q[2] >= 0; if (side !== null && s !== side) { const last = (side ? front : back); last.push([q[0], q[1]]); flush(); } (s ? front : back).push([q[0], q[1]]); side = s; }
+    flush();
+  };
+  for (let k = -2; k <= 2; k++) { const lat = k * Math.PI / 6; draw(Array.from({ length: 73 }, (_, i) => proj(lat, i / 72 * Math.PI * 2)), k); }
+  for (let k = 0; k < 8; k++) { const lon = k * Math.PI / 8; draw(Array.from({ length: 73 }, (_, i) => proj(-Math.PI / 2 + i / 72 * Math.PI * 2, lon)), k); }
+  line(ell(cx, cy, r, r), p, 2, o.ink || C.ink);
+}
+
+/* ═════════ 3D forest (scenes 5 and 6): a tiny projective renderer ═════════ */
+const TREES3 = (() => {
+  const t = [];
+  const add = (X, Z, h, s) => t.push({ X, Z, h: h * 0.62, s });
+  add(-2.4, 3.6, 18, 1); add(2.9, 4.2, 19, 2); add(1.6, 6.6, 17, 3); add(-1.2, 7.4, 16, 4); add(-4.6, 6.2, 18, 5);
+  add(4.8, 8.4, 17, 6); add(0.3, 10.5, 16, 7); add(-3.2, 11.8, 18, 8); add(3.1, 13.2, 17, 9); add(-0.9, 15.8, 16, 10);
+  add(5.6, 16.5, 18, 11); add(-6.4, 14, 17, 12); add(1.8, 19.5, 16, 13); add(-2.6, 22, 17, 14); add(4.2, 24, 16, 15);
+  add(-5.2, 26, 17, 16); add(0.6, 28, 16, 17); add(7.5, 21, 17, 18); add(-8.5, 19, 16, 19); add(-1.6, 33, 16, 20); add(3.6, 36, 17, 21);
+  return t;
+})();
+const TUFTS = Array.from({ length: 140 }, (_, i) => ({ X: (hash(i * 1.3) - 0.5) * 22, Z: 1.4 + hash(i * 2.9) * 26, s: i }));
+function view3D(vx, vy, vw, vh, ox, oy, o = {}) {
+  const cx = vx + vw / 2, hy = vy + vh * 0.6, f = vh * 0.62, eye = 1.6 + oy;
+  const P = (X, Y, Z) => [cx + f * (X - ox) / Z, hy - f * (Y - eye) / Z];
+  g.save(); g.beginPath(); g.rect(vx, vy, vw, vh); g.clip();
+  const gr = g.createLinearGradient(0, vy, 0, hy); gr.addColorStop(0, C.sky0); gr.addColorStop(1, C.sky1);
+  g.fillStyle = gr; g.fillRect(vx, vy, vw, hy - vy + 1);
+  // far forest band
+  g.fillStyle = C.farF; g.beginPath(); g.moveTo(vx, hy + 1);
+  for (let x = 0; x <= vw + 24; x += 12) { const u = (x - ox * f * 0.008) * 0.012; g.lineTo(vx + x, hy - vh * (0.035 + 0.04 * noise(u * 3 + 7) + (hash(Math.floor(u * 9)) > 0.72 ? 0.025 : 0))); }
+  g.lineTo(vx + vw, hy + 1); g.closePath(); g.fill();
+  const gg = g.createLinearGradient(0, hy, 0, vy + vh); gg.addColorStop(0, C.ground2); gg.addColorStop(0.25, C.ground); gg.addColorStop(1, '#EBE3CB');
+  g.fillStyle = gg; g.fillRect(vx, hy, vw, vy + vh - hy);
+  // depth-sorted drawables
+  const items = [];
+  for (const t of TUFTS) items.push({ z: t.Z, d: () => { const [x, y] = P(t.X, 0, t.Z), k = f / t.Z; g.strokeStyle = C.grass; g.globalAlpha = 0.75; g.lineWidth = Math.max(0.8, 0.03 * k); g.lineCap = 'round'; g.beginPath(); for (let b = -1; b <= 1; b++) { g.moveTo(x + b * 0.05 * k, y); g.lineTo(x + b * 0.1 * k, y - 0.22 * k); } g.stroke(); g.globalAlpha = 1; } });
+  for (const t of TREES3) items.push({ z: t.Z, d: () => tree3(P, f, t) });
+  if (o.extra) o.extra.forEach(e => items.push({ z: e.z, d: () => e.draw(P, f) }));
+  items.sort((a, b) => b.z - a.z).forEach(i => i.d());
+  if (o.after) o.after(P, f);
+  g.restore();
+}
+function tree3(P, f, t) {
+  const hz = clamp((t.Z - 5) / 36) * 0.7;
+  const r0 = 0.2, r1 = 0.09;
+  const [bx, by] = P(t.X, 0, t.Z), k = f / t.Z;
+  // ground shadow
+  g.save(); g.globalAlpha = 0.18 * (1 - hz); g.fillStyle = '#5B5236'; g.beginPath(); g.ellipse(bx + 0.4 * k, by, 0.9 * k, 0.12 * k, 0, 0, Math.PI * 2); g.fill(); g.restore();
+  const topY = t.h * 0.84;
+  const trunk = [[bx - r0 * k, by], [bx + r0 * k, by], [bx + r1 * k, by - topY * k], [bx - r1 * k, by - topY * k]];
+  fillp(trunk, mix(C.bark, C.haze, hz), 1);
+  fillp([[bx + r0 * 0.15 * k, by], [bx + r0 * k, by], [bx + r1 * k, by - topY * k], [bx + r1 * 0.1 * k, by - topY * k]], mix(C.barkD, C.haze, hz), 0.55);
+  for (let i = 0; i < 4; i++) {
+    const s = t.s * 17 + i, cx = bx + (hash(s) - 0.5) * 3.4 * k, cy = by - (t.h * 0.9 + (hash(s + 1) - 0.4) * 1.6 + i * 0.3) * k;
+    const c = clump(cx, cy, (1.2 + hash(s + 2) * 1.1) * k, (0.6 + hash(s + 3) * 0.35) * k, s, 40);
+    fillp(c, mix(i % 2 ? C.crown : C.crown2, C.haze, hz), 1);
+    if (i === 0) fillp(clump(cx - 0.3 * k, cy - 0.15 * k, 0.7 * k, 0.28 * k, s + 5, 30), mix(C.crownL, C.haze, hz), 0.6);
+  }
+  g.save(); g.globalAlpha = 0.25 * (1 - hz); g.strokeStyle = C.ink; g.lineWidth = Math.max(0.6, 0.012 * k);
+  path(trunk); g.closePath(); g.stroke(); g.restore();
+}
+/* a box with flat-shaded faces, back faces culled */
+function box(P, cam, x0, y0, z0, x1, y1, z1, cols) {
+  const V = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
+  const F = [[[0, 1, 2, 3], [0, 0, -1], cols.front], [[5, 4, 7, 6], [0, 0, 1], cols.side], [[4, 0, 3, 7], [-1, 0, 0], cols.side], [[1, 5, 6, 2], [1, 0, 0], cols.side], [[3, 2, 6, 7], [0, 1, 0], cols.top], [[4, 5, 1, 0], [0, -1, 0], cols.side]];
+  const faces = [];
+  for (const [ix, n, col] of F) {
+    const c = [0, 1, 2].map(a => ix.reduce((s, i) => s + V[i][a], 0) / 4);
+    const v = [cam[0] - c[0], cam[1] - c[1], cam[2] - c[2]];
+    if (v[0] * n[0] + v[1] * n[1] + v[2] * n[2] <= 0) continue;
+    faces.push({ d: Math.hypot(...v), pts: ix.map(i => P(...V[i])), col });
+  }
+  faces.sort((a, b) => b.d - a.d).forEach(fc => { fillp(fc.pts, fc.col, 1); g.save(); g.strokeStyle = 'rgba(40,30,20,0.35)'; g.lineWidth = 1.2; g.lineJoin = 'round'; path(fc.pts); g.closePath(); g.stroke(); g.restore(); });
+}
+/* the 3D object: a forest information board on two posts */
+function board(P, cam, X, Y, Z) {
+  const c = { front: C.wood, side: C.woodS, top: C.woodT };
+  box(P, cam, X - 0.62, Y, Z - 0.05, X - 0.52, Y + 1.3, Z + 0.05, c);
+  box(P, cam, X + 0.52, Y, Z - 0.05, X + 0.62, Y + 1.3, Z + 0.05, c);
+  box(P, cam, X - 0.75, Y + 0.85, Z - 0.09, X + 0.75, Y + 1.75, Z - 0.03, c);
+  box(P, cam, X - 0.85, Y + 1.75, Z - 0.2, X + 0.85, Y + 1.84, Z + 0.1, { front: C.slate, side: '#22292E', top: '#46555D' });
+  // panel: map and text lines
+  const q = (x, y) => P(X + x, Y + y, Z - 0.095);
+  fillp([q(-0.66, 0.95), q(0.66, 0.95), q(0.66, 1.66), q(-0.66, 1.66)], '#F4EFE2', 1);
+  fillp([q(-0.6, 1.2), q(-0.05, 1.2), q(-0.05, 1.6), q(-0.6, 1.6)], C.crownL, 0.85);
+  fillp([q(-0.6, 1.0), q(-0.05, 1.0), q(-0.05, 1.18), q(-0.6, 1.18)], C.mintL, 0.9);
+  for (let i = 0; i < 4; i++) fillp([q(0.04, 1.52 - i * 0.12), q(0.58 - (i % 2) * 0.16, 1.52 - i * 0.12), q(0.58 - (i % 2) * 0.16, 1.56 - i * 0.12), q(0.04, 1.56 - i * 0.12)], '#8B8F86', 0.8);
+}
+
+/* ═════════ words: revealed word by word, placed per scene ═════════ */
+let LT = 0, LEN = 1;                      // scene-local time and scene length
+function wrapW(s, maxW, size, weight) {
+  g.save(); g.font = `${weight} ${size}px ${FONT}`;
+  const out = []; let cur = '';
+  for (const w of s.split(' ')) { const t = cur ? cur + ' ' + w : w; if (g.measureText(t).width > maxW && cur) { out.push(cur); cur = w; } else cur = t; }
+  if (cur) out.push(cur); g.restore(); return out;
+}
+/* s: text; x, y: first baseline; o: { size, weight, col, w (wrap width), t0 (start), align, lh } */
+function say(s, x, y, o = {}) {
+  const size = o.size || 76, weight = o.weight || 600, col = o.col || C.ink, t0 = o.t0 ?? 0.5, lh = (o.lh || 1.16) * size;
+  const lines = wrapW(s, o.w || 1100, size, weight);
+  const fade = o.until != null ? 1 - seg(LT, o.until, o.until + 0.6) : seg(LEN - LT, 0, 0.7);
+  g.save(); g.font = `${weight} ${size}px ${FONT}`; g.fillStyle = col; g.textBaseline = 'alphabetic';
+  if (size > 50) g.letterSpacing = '-1px';
+  let k = 0;
+  lines.forEach((ln, i) => {
+    const words = ln.split(' '), sp = g.measureText(' ').width, tw = g.measureText(ln).width;
+    let cx = o.align === 'center' ? x - tw / 2 : o.align === 'right' ? x - tw : x;
+    for (const w of words) {
+      const a = out3(seg(LT, t0 + k * 0.07, t0 + k * 0.07 + 0.6)) * fade;
+      if (a > 0) { g.globalAlpha = a; g.fillText(w, cx, y + i * lh + (1 - a) * size * 0.28); }
+      cx += g.measureText(w).width + sp; k++;
+    }
+  });
+  g.restore();
+  return y + lines.length * lh;
+}
+const BODY = { size: 34, weight: 400, col: '#4E5855', lh: 1.38 };
+
+/* ═════════ scenes ═════════ */
+// 0 · the question: a forest in 3D, without a laser scanner (0 – 9.5)
+const SCAN_PTS = (() => {
+  const pts = [];
+  FOREST.filter(t => t.layer > 0).forEach((t, i) => { for (let j = 0; j < 9; j++) pts.push({ x: t.x + (hash(i * 31 + j) - 0.5) * t.h * 0.03, y: 820 + 12 - t.h * (0.05 + 0.8 * hash(i * 17 + j)), a: hash(i * 7 + j) }); });
+  for (let j = 0; j < 60; j++) pts.push({ x: hash(j * 3.7) * 1920, y: 836 + hash(j * 5.1) * 30, a: hash(j * 2.3) });
+  return pts;
+})();
+function s0(lt) {
+  const gy = 820;
+  line([[0, gy + 4], [1920, gy - 2]], ease(lt, 0, 1.2), 1.6, C.ink, 1);
+  line([[0, gy + 36], [1920, gy + 30]], ease(lt, 0.4, 1.6), 1, C.ink3, 1);
+  forest2D(gy, seg(lt, 0, 2.6));
+  const sx = 1130, sc = seg(lt, 2.4, 3.2), gone = ease(lt, 5.6, 6.6);
+  // terrestrial laser scanner on a tripod
+  if (sc > 0 && gone < 1) {
+    g.save(); g.globalAlpha *= 1 - gone;
+    const top = [sx, gy - 150];
+    line([top, [sx - 52, gy + 8]], sc, 2.4); line([top, [sx + 54, gy + 8]], sc, 2.4); line([top, [sx + 6, gy + 12]], sc, 2.4);
+    const body = rrect(sx - 38, gy - 262, 76, 106, 10);
+    fillp(body, C.paper, sc); line(body, sc, 2.4);
+    const drum = rrect(sx - 22, gy - 300, 44, 40, 18);
+    fillp(drum, C.paper, sc); line(drum, sc, 2.4);
+    line([[sx - 26, gy - 214], [sx + 26, gy - 214]], sc, 1.6, C.ink2);
+    // the laser sweeps: a fan of rays to points that stay behind
+    const sweep = seg(lt, 3.0, 5.6);
+    if (sweep > 0) {
+      // the head turns: a vertical fan of rays moves across the scene, leaving points behind
+      const X = lerp(-40, 1960, sweep), src = [sx, gy - 280];
+      for (let i = 0; i < 9; i++) line([src, [X, lerp(60, gy + 30, i / 8)]], 1, 1, C.ink2, 0.22 * (1 - seg(sweep, 0.97, 1)));
+      g.save(); g.fillStyle = C.ink;
+      for (const p of SCAN_PTS) if (p.x <= X) { g.globalAlpha = 0.85; g.beginPath(); g.arc(p.x, p.y, 2.4, 0, Math.PI * 2); g.fill(); }
+      g.restore();
+    }
+    g.restore();
+  }
+  // the camera instead
+  const cp = seg(lt, 6.4, 7.6);
+  if (cp > 0) tripod(sx, gy + 6, 1.35, cp);
+  LT = lt; LEN = 9.5;
+  say('Say you need this forest in 3D.', 120, 190, { t0: 0.8, until: 8.8 });
+  say('A laser scanner would measure it point by point.', 122, 262, Object.assign({ t0: 3.0, w: 760, until: 5.6 }, BODY));
+  say('Few forestry teams own one.', 122, 262, Object.assign({ t0: 6.0, w: 760, until: 8.8 }, BODY));
+  say('Almost everyone has a camera.', 120, 980, { t0: 7.2, w: 1200, size: 64 });
+}
+// 1 · six shots from one tripod
+function s1(lt) {
+  const zoom = lerp(1, 1.05, ease(lt, 0, 11.5)), fx = 1100, fy = 640;
+  g.save(); g.translate(fx, fy); g.scale(zoom, zoom); g.translate(-fx, -fy);
+  const gy = 820;
+  line([[0, gy + 4], [1920, gy - 2]], 1, 1.6, C.ink, 1);
+  line([[0, gy + 36], [1920, gy + 30]], 1, 1, C.ink3, 1);
+  forest2D(gy, 1);
+  // walking at a constant speed; the gait phase follows the distance, so feet do not slide
+  const x0 = -60, x1 = 990, wt0 = 2.4, wt1 = 6.0;
+  const u = seg(lt, wt0, wt1), mx = lerp(x0, x1, u);
+  const stride = 4 * 118 * 1.3 * Math.sin(0.36);                 // ground covered per gait cycle
+  const ph = (mx - x0) / stride * Math.PI * 2;
+  const tp = seg(lt, 6.2, 7.2);
+  const camX = 1130, camY = gy - 196;
+  const cam = tp > 0 ? tripod(camX, gy + 6, 1.35, tp) : [camX, camY];
+  // ring of six frames around the camera, at camera height: the panorama being captured
+  const R = 440, r = 80, fh = 190, rot = ease(lt, 10.6, 13.2) * 0.45, ry0 = -190;   // ring floats above the camera
+  const shots = [];
+  for (let k = 0; k < 6; k++) {
+    const t0 = 7.6 + k * 0.45, sp = out3(seg(lt, t0, t0 + 0.5));
+    if (sp <= 0) continue;
+    const a0 = -Math.PI / 2 + k * Math.PI / 3 + 0.04 + rot, a1 = a0 + Math.PI / 3 - 0.08;
+    shots.push({ k, sp, a0, a1, depth: Math.sin((a0 + a1) / 2) });
+  }
+  const frame = (sh0, front) => {
+    const { k, sp, a0, a1 } = sh0, n = 16, top = [], bot = [];
+    for (let i = 0; i <= n; i++) {
+      const a = lerp(a0, a1, i / n), px = cam[0] + Math.cos(a) * R * sp, py = cam[1] + ry0 * sp + Math.sin(a) * r * sp;
+      top.push([px, py - fh / 2 * sp]); bot.push([px, py + fh / 2 * sp]);
+    }
+    const quad = [...top, ...bot.slice().reverse()];
+    fillp(quad, C.paper, front ? 0.62 : 0.8);
+    line([...quad, quad[0]], 1, front ? 1.8 : 1.3, front ? C.ink : C.ink3, sp);
+    // a few trunks and a horizon inside each frame
+    for (let m = 1; m < 5; m++) {
+      const i = Math.round(m / 5 * n), hh = (0.35 + 0.45 * hash(k * 9 + m)) * fh * sp;
+      const bx2 = bot[i][0], by2 = bot[i][1] - fh * 0.22 * sp;
+      line([[bx2, by2], [bx2, by2 - hh]], 1, 1, front ? C.ink2 : C.ink3, 0.9);
+      line(clump(bx2, by2 - hh, 12 * sp, 6 * sp, k * 9 + m, 24), 1, 1, front ? C.ink2 : C.ink3, 0.9);
+    }
+    line(bot.map(([x, y]) => [x, y - fh * 0.22 * sp]), 1, 1, front ? C.ink2 : C.ink3, 0.8);
+  };
+  shots.filter(q => q.depth < 0).forEach(q => frame(q, false));
+  // the capture wedge from the lens toward the current frame, with a shutter flash
+  for (const q of shots) {
+    const t0 = 7.6 + q.k * 0.45, fl = 1 - seg(lt, t0, t0 + 0.4);
+    if (fl <= 0) continue;
+    const ma = (q.a0 + q.a1) / 2, ex = cam[0] + Math.cos(ma) * R * q.sp, ey = cam[1] + ry0 * q.sp + Math.sin(ma) * r * q.sp;
+    fillp([cam, [ex, ey - fh / 2 * q.sp], [ex, ey + fh / 2 * q.sp]], C.ink, 0.08 * fl);
+    const rr = 16 + 34 * (1 - fl);
+    g.save(); g.globalAlpha = fl; g.fillStyle = '#FFFFFF'; g.beginPath(); g.arc(cam[0], cam[1], rr, 0, Math.PI * 2); g.fill(); g.restore();
+    line(ell(cam[0], cam[1], rr, rr), 1, 1.2, C.ink, fl);
+  }
+  hiker(mx, gy + 8, 1.3, { pose: u > 0 && u < 1 ? 'walk' : u >= 1 ? 'operate' : 'stand', ph, a: seg(lt, wt0 - 0.3, wt0) });
+  if (tp > 0) tripod(camX, gy + 6, 1.35, tp);                   // in front of the hiker's back arm
+  shots.filter(q => q.depth >= 0).forEach(q => frame(q, true));
+  g.restore();
+  LT = lt; LEN = 13.5;
+  say('Six shots from one tripod.', 120, 190, { t0: 1.4 });
+  say('Turned a full circle, they cover everything around the camera.', 122, 262, Object.assign({ t0: 2.2, w: 760 }, BODY));
+  // callout at the ring
+  const ca = seg(lt, 10.4, 10.9) * seg(11.5 - lt, 0, 0.6);
+  if (ca > 0) { line([[1130 + 448, 624 - 190], [1640, 380], [1700, 380]], ca, 1.4, C.ink2); text('360°', 1712, 392, 36, 600, C.ink, ca); }
+}
+// 2 · stitched at home (11.5 – 21.5)
+function s2(lt) {
+  const mx = 360, my = 200, mw = 760, mh = 450;
+  line([[90, 770], [1180, 770]], ease(lt, 0, 1.0), 1.8);
+  line(rrect(mx, my, mw, mh, 14), ease(lt, 0.2, 1.4), 2.2);
+  line([[mx + mw / 2 - 18, my + mh], [mx + mw / 2 - 28, 754], [mx + mw / 2 - 110, 768]], ease(lt, 0.8, 1.4), 2);
+  line([[mx + mw / 2 + 18, my + mh], [mx + mw / 2 + 28, 754], [mx + mw / 2 + 110, 768]], ease(lt, 0.8, 1.4), 2);
+  // chair and the photographer, seated
+  const ca = seg(lt, 0.5, 1.0);
+  line([[150, 770 + 0], [150, 690], [235, 690], [235, 770]], ca, 2, C.ink2);
+  line([[150, 690], [138, 560]], ca, 2, C.ink2);
+  hiker(196, 774, 1.1, { pose: 'sit', a: ca });
+  const sx = mx + 40, sy = my + 110, sw = mw - 80, sh = 200;
+  const merge = ease(lt, 4.4, 5.4);
+  for (let k = 0; k < 6; k++) {
+    const fp = io(seg(lt, 1.6 + k * 0.22, 3.2 + k * 0.22));
+    if (fp <= 0) continue;
+    const startX = 1250 + (k % 3) * 150, startY = 160 + Math.floor(k / 3) * 120;
+    const fw = lerp(130, sw / 6 + 14, fp), fh = lerp(90, sh, fp);
+    const x = lerp(startX, sx + k * (sw / 6) - 7, fp), y = lerp(startY, sy, fp);
+    g.save(); g.globalAlpha *= (1 - merge) * seg(lt, 1.6 + k * 0.22, 1.9 + k * 0.22);
+    g.save(); g.beginPath(); g.rect(x, y, fw, fh); g.clip();
+    fillp([[x, y], [x + fw, y], [x + fw, y + fh], [x, y + fh]], C.paper, 1);
+    strip(x - (k * sw / 6) * fp, y, sw, fh, 1);
+    g.restore();
+    line(rrect(x, y, fw, fh, 3, 2), 1, 1.6, C.ink, 1);
+    g.restore();
+  }
+  if (merge > 0) { g.save(); g.globalAlpha *= merge; strip(sx, sy, sw, sh, 1); g.restore(); }
+  const wrapP = ease(lt, 6.0, 7.4);
+  if (wrapP > 0) {
+    text('360° × 180°', sx, sy + sh + 44, 26, 500, C.ink2, wrapP);
+    sphere(1080, 150, 92, lt * 0.5, wrapP);
+  }
+  LT = lt; LEN = 10;
+  say('Stitched at home into one 360° image.', 1290, 470, { t0: 4.6, w: 520, size: 68 });
+  say('On a screen it looks right. It is still a flat picture.', 1292, 720, Object.assign({ t0: 6.0, w: 520 }, BODY));
+}
+// 3 · wallpaper in a headset (21.5 – 32)
+function s3(lt) {
+  const sway = Math.sin(seg(lt, 2.4, 9.6) * Math.PI * 3) * seg(lt, 2.4, 3.2) * (1 - seg(lt, 9.0, 9.6));
+  const vx = 150, vy = 330, vw = 820, vh = 500;
+  const lens = rrect(vx, vy, vw, vh, 110);
+  g.save(); path(lens); g.clip();
+  fillp([[vx, vy], [vx + vw, vy], [vx + vw, vy + vh], [vx, vy + vh]], C.paper, 1);
+  g.save(); g.translate(vx + vw / 2 + sway * 90, vy + vh * 0.62); g.scale(0.5, 0.5); g.translate(-960, -620);
+  line([[-400, 794], [2320, 790]], 1, 2.6, C.ink); forest2D(790, seg(lt, 0, 2.2), 0, 1, { flat: true });
+  g.restore(); g.restore();
+  line(lens, ease(lt, 0, 1.2), 3.2);
+  fillp([[vx + vw / 2 - 70, vy + vh + 2], [vx + vw / 2 - 36, vy + vh - 58], [vx + vw / 2 + 36, vy + vh - 58], [vx + vw / 2 + 70, vy + vh + 2]], C.paper, 1);
+  line([[vx + vw / 2 - 70, vy + vh], [vx + vw / 2 - 36, vy + vh - 58], [vx + vw / 2 + 36, vy + vh - 58], [vx + vw / 2 + 70, vy + vh]], ease(lt, 0.6, 1.4), 3.2);
+  const aa = seg(lt, 2.6, 3.2) * (1 - seg(lt, 9.0, 9.4));
+  if (aa > 0) {
+    const ax = vx + vw / 2 + sway * 90, ay = vy + vh + 50;
+    line([[ax - 60, ay], [ax + 60, ay]], 1, 2, C.ink, aa);
+    line([[ax + 48, ay - 10], [ax + 60, ay], [ax + 48, ay + 10]], 1, 2, C.ink, aa);
+    line([[ax - 48, ay - 10], [ax - 60, ay], [ax - 48, ay + 10]], 1, 2, C.ink, aa);
+  }
+  const px = 1450 + sway * 70, py = 590, R = 220;
+  line(ell(px, py, R, R), ease(lt, 1.0, 2.4), 2);
+  for (let i = 0; i < 16; i++) {
+    const a = i / 16 * Math.PI * 2 + 0.15, tp = seg(lt, 1.8 + i * 0.05, 2.2 + i * 0.05);
+    const tx = px + Math.cos(a) * R, ty = py + Math.sin(a) * R;
+    if (tp > 0) { fillp(ell(tx, ty, 11, 11, 0, Math.PI * 2, 20), C.paper, 1); line(ell(tx, ty, 11, 11, 0, Math.PI * 2, 20), tp, 1.8); }
+  }
+  const vp = seg(lt, 1.2, 1.8);
+  fillp([[px, py], [px + 110, py - 190], [px - 110, py - 190]], C.ink, 0.06 * vp);
+  line([[px + 110, py - 190], [px, py], [px - 110, py - 190]], vp, 1.2, C.ink2);
+  fillp(ell(px, py, 18, 18, 0, Math.PI * 2, 24), C.ink, vp);
+  fillp(rrect(px - 14, py - 26, 28, 12, 5, 3), C.ink, vp);
+  const ta = -Math.PI * 0.33, tx = px + Math.cos(ta) * R, ty = py + Math.sin(ta) * R;
+  const tb = -Math.PI * 0.75, tx2 = px + Math.cos(tb) * R, ty2 = py + Math.sin(tb) * R;
+  line([[px, py], [tx, ty]], seg(lt, 4.2, 5.2), 1.6, C.ink, 1, [7, 7]);
+  line([[px, py], [tx2, ty2]], seg(lt, 4.6, 5.6), 1.6, C.ink, 1, [7, 7]);
+  text('?', tx + 22, ty - 12, 48, 600, C.ink, seg(lt, 5.0, 5.4));
+  text('?', tx2 - 48, ty2 - 10, 48, 600, C.ink, seg(lt, 5.4, 5.8));
+  LT = lt; LEN = 10.5;
+  say('In a headset it is wallpaper.', 960, 150, { t0: 0.8, align: 'center', size: 80 });
+  say('Every tree is the same distance away. Lean to the side and the whole forest leans with you.', 960, 222, Object.assign({ t0: 2.4, align: 'center', w: 1300 }, BODY));
+}
+// 4 · depth from one image (32 – 43.5)
+const PLAN = Array.from({ length: 16 }, (_, i) => ({ a: i / 16 * Math.PI * 2 + 0.15, r: 0.3 + 0.7 * hash(i * 5.1 + 2) }));
+function s4(lt) {
+  const x = 120, y = 110, w = 1680, h = 320;
+  const scan = ease(lt, 1.6, 5.2);
+  strip(x, y, w, h, seg(lt, 0, 1.4));
+  g.save(); g.beginPath(); g.rect(x, y, w * scan, h); g.clip();
+  fillp([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], C.paper, 1);
+  strip(x, y, w, h, 1, { depth: 1 - COL });
+  g.restore();
+  if (scan > 0 && scan < 1) fillp([[x + w * scan - 2, y - 12], [x + w * scan + 2, y - 12], [x + w * scan + 2, y + h + 12], [x + w * scan - 2, y + h + 12]], C.mint, 1);
+  text(scan < 1 ? 'estimating depth' : 'depth map: white is near', x + w, y + h + 40, 24, 500, C.ink2, seg(lt, 1.6, 2.0) * (1 - COL), { align: 'right' });
+  const cx = 560, cy = 720, R = 120, mv = ease(lt, 5.0, 7.6);
+  line(ell(cx, cy, R, R), seg(lt, 0.5, 1.6), 1.6, C.ink, 1 - 0.85 * mv, mv > 0 ? [6, 8] : null);
+  fillp(ell(cx, cy, 13, 13, 0, Math.PI * 2, 20), mix(C.ink, C.mint, COL), seg(lt, 0.6, 1.0));
+  PLAN.forEach((p, i) => {
+    const r = lerp(R, 40 + p.r * 220, mv), px = cx + Math.cos(p.a) * r * 1.7, py = cy + Math.sin(p.a) * r * 0.55;
+    const sz = lerp(9, 6 + 10 * (1 - p.r), mv);
+    fillp(ell(px, py, sz, sz, 0, Math.PI * 2, 20), mix(C.paper, i % 3 ? C.crown : C.crownL, COL), 1);
+    line(ell(px, py, sz, sz, 0, Math.PI * 2, 20), seg(lt, 0.8 + i * 0.04, 1.2 + i * 0.04), 1.6, C.ink, 1 - 0.5 * COL);
+  });
+  LT = lt; LEN = 11.5;
+  // brand + statement on the right
+  const bp = seg(lt, 0.8, 1.4) * seg(LEN - lt, 0, 0.7);
+  fillp(rrect(1120, 548, 30, 30, 7, 3), C.mint, bp);
+  line(rrect(1110, 558, 30, 30, 7, 3), bp, 2, C.ink2);
+  text('nomono3d', 1166, 578, 32, 600, C.ink, bp);
+  say('Works out how far away every pixel is.', 1120, 680, { t0: 1.2, w: 690, size: 64 });
+  say('From that one ordinary panorama, without a scanner or extra photos.', 1122, 850, Object.assign({ t0: 2.6, w: 640 }, BODY));
+}
+// 5 · inside, in depth (43.5 – 55.5)
+function s5(lt) {
+  const vx = 640, vy = 110, vw = 1180, vh = 700;
+  const sway = Math.sin(lt * 0.9) * 0.55 * seg(lt, 0, 1.2), bob = Math.sin(lt * 1.8) * 0.04;
+  const lens = rrect(vx, vy, vw, vh, 140);
+  const ft = lt - 5.2, OBJ = { X: -1.1, Z: 3.7 };
+  let oy = 3.2;
+  if (ft > 0) { if (ft < 0.8) oy = 3.2 * (1 - (ft / 0.8) * (ft / 0.8)); else { const b = ft - 0.8; oy = b < 0.34 ? 0.34 * Math.sin(b / 0.34 * Math.PI) : b < 0.54 ? 0.07 * Math.sin((b - 0.34) / 0.2 * Math.PI) : 0; } }
+  g.save(); path(lens); g.clip();
+  view3D(vx, vy, vw, vh, sway, bob, {
+    extra: ft > 0 ? [{ z: OBJ.Z, draw: (P, f) => {
+      const [sx, sy] = P(OBJ.X, 0, OBJ.Z), k = f / OBJ.Z, near = clamp(1 - oy / 3);
+      g.save(); g.globalAlpha = 0.3 * near * seg(ft, 0, 0.3); g.fillStyle = '#3F3826'; g.beginPath(); g.ellipse(sx + 0.1 * k, sy + 0.02 * k, 1.1 * k * (0.6 + 0.4 * near), 0.16 * k, 0, 0, Math.PI * 2); g.fill(); g.restore();
+      g.save(); g.globalAlpha = seg(ft, 0, 0.2); board(P, [sway, 1.6 + bob, 0], OBJ.X, oy, OBJ.Z); g.restore();
+    } }] : [],
+    after: (P, f) => {
+      const mp = ease(lt, 1.8, 3.0), A = [0.5, 0, 2.6], B = [1.6, 0, 6.6];
+      if (mp > 0) {
+        const pa = P(...A), pb = P(...B), pe = [lerp(pa[0], pb[0], mp), lerp(pa[1], pb[1], mp)];
+        line([pa, pe], 1, 8, 'rgba(20,24,22,0.35)'); line([pa, pe], 1, 4, C.amber, 1, [16, 10]);
+        fillp(ell(pa[0], pa[1], 9, 9, 0, Math.PI * 2, 18), C.amber, 1);
+        fillp(ell(pb[0], pb[1], 9, 9, 0, Math.PI * 2, 18), C.amber, seg(lt, 2.9, 3.1));
+        const la = seg(lt, 3.0, 3.4);
+        if (la > 0) {
+          const lx = lerp(pa[0], pb[0], 0.55) + 26, ly = lerp(pa[1], pb[1], 0.55);
+          g.save(); g.globalAlpha = la; fillp(rrect(lx, ly - 50, 168, 64, 12), 'rgba(16,19,18,0.88)', 1); g.restore();
+          text('6.8 m', lx + 22, ly - 6, 40, 600, '#FBE7A6', la);
+        }
+      }
+      const gz = seg(ft, 1.6, 2.0) * (1 - seg(ft, 4.6, 5.0));
+      if (gz > 0) {
+        const o = P(OBJ.X, 0.02, OBJ.Z), ax = P(OBJ.X + 0.9, 0.02, OBJ.Z), ay = P(OBJ.X, 1.1, OBJ.Z), az = P(OBJ.X, 0.02, OBJ.Z + 1.2);
+        [[ax, '#E05A47'], [ay, '#4FAE6A'], [az, '#4E84D6']].forEach(([e, c]) => { line([o, e], 1, 5, c, gz); fillp(ell(e[0], e[1], 7, 7, 0, Math.PI * 2, 16), c, gz); });
+      }
+    }
+  });
+  g.restore();
+  line(lens, 1, 4, C.ink, 0.92);
+  fillp([[vx + vw / 2 - 86, vy + vh + 3], [vx + vw / 2 - 44, vy + vh - 70], [vx + vw / 2 + 44, vy + vh - 70], [vx + vw / 2 + 86, vy + vh + 3]], C.paper, 1);
+  line([[vx + vw / 2 - 86, vy + vh], [vx + vw / 2 - 44, vy + vh - 70], [vx + vw / 2 + 44, vy + vh - 70], [vx + vw / 2 + 86, vy + vh]], 1, 4, C.ink, 0.92);
+  LT = lt; LEN = 12;
+  say('The trees are back where they stood.', 120, 300, { t0: 0.6, w: 470, size: 66 });
+  say('That pine is 6.8 m away.', 122, 640, Object.assign({ t0: 3.2, w: 470 }, BODY));
+  say('A signboard dropped into the scene lands on the ground and stays there.', 122, 735, Object.assign({ t0: 6.4, w: 470 }, BODY));
+}
+// 6 · laptop and phone; the front camera follows the head (55.5 – 65)
+function s6(lt) {
+  // the viewer's head moves; the webcam tracks it and the view angle follows
+  const hx = Math.sin(seg(lt, 1.6, 8.6) * Math.PI * 2) * seg(lt, 1.6, 2.2) * (1 - seg(lt, 8.0, 8.6));
+  const sx = 230, sy = 330, sw = 900, sh = 500;
+  fillp(rrect(sx - 20, sy - 20, sw + 40, sh + 40, 20), C.slate, 1);
+  view3D(sx, sy, sw, sh, hx * 0.9, 0);
+  fillp([[sx - 110, sy + sh + 20], [sx + sw + 110, sy + sh + 20], [sx + sw + 180, sy + sh + 62], [sx - 180, sy + sh + 62]], '#CDD1CF', 1);
+  // webcam
+  const cam = [sx + sw / 2, sy - 10], on = seg(lt, 1.0, 1.4);
+  fillp(ell(cam[0], cam[1], 6, 6, 0, Math.PI * 2, 16), mix('#55606A', C.mintL, on), 1);
+  // the viewer: a head and shoulders seen from behind, in front of the laptop
+  const head = [sx + sw / 2 + hx * 160, 980];
+  const sa = seg(lt, 0.3, 0.9);
+  g.save(); g.globalAlpha = sa;
+  fillp([[head[0] - 150, 1080], [head[0] - 120, 1010], [head[0] - 40, 985], [head[0] + 40, 985], [head[0] + 120, 1010], [head[0] + 150, 1080]], C.slate, 1);
+  fillp(ell(head[0], head[1] - 40, 54, 62, 0, Math.PI * 2, 40), '#3C4A52', 1);
+  g.restore();
+  // tracking: dashed rays from the webcam to the head, a box around it
+  const ta = on * sa * (1 - seg(lt, 8.4, 8.8));
+  if (ta > 0) {
+    line([cam, [head[0] - 50, head[1] - 90]], 1, 1.4, C.mint, ta * 0.8, [6, 7]);
+    line([cam, [head[0] + 50, head[1] - 90]], 1, 1.4, C.mint, ta * 0.8, [6, 7]);
+    line(rrect(head[0] - 66, head[1] - 112, 132, 140, 10), 1, 2.4, C.mint, ta);
+  }
+  // phone, tilting
+  const tilt = Math.sin(lt * 1.3) * 0.14 * seg(lt, 0.4, 1.2), px = 1560, py = 640;
+  g.save(); g.translate(px, py); g.rotate(tilt);
+  fillp(rrect(-115, -215, 230, 430, 34), C.slate, 1);
+  view3D(-101, -199, 202, 398, tilt * 4, 0);
+  fillp(rrect(-28, -207, 56, 9, 4.5, 3), C.slate, 1);
+  g.restore();
+  g.save(); g.globalAlpha = 0.6 * seg(lt, 1.0, 1.6); g.strokeStyle = C.ink2; g.lineWidth = 2; g.lineCap = 'round';
+  g.beginPath(); g.arc(px, py + 40, 310, -Math.PI * 0.6, -Math.PI * 0.4); g.stroke(); g.restore();
+  LT = lt; LEN = 9.5;
+  say('Without a headset, too.', 120, 150, { t0: 0.6, size: 76 });
+  say('The laptop camera follows your head and turns the view to match its angle.', 122, 222, Object.assign({ t0: 1.8, w: 900 }, BODY));
+  say('On a phone, tilt it.', 1410, 330, Object.assign({ t0: 4.2, w: 400 }, BODY));
+}
+// 7 · end (65 – 71)
+function s7(lt) {
+  fillp([[0, 0], [W, 0], [W, H], [0, H]], C.dark, 1);
+  const layers = [['#14201B', 0.3, 780], ['#18291F', 0.55, 850], ['#1E3427', 0.9, 930]];
+  layers.forEach(([c, k, base], L) => {
+    g.fillStyle = c; g.beginPath(); g.moveTo(0, H);
+    for (let x = -20; x <= W + 20; x += 6) {
+      const xx = x + lt * 14 * k, n = noise(xx * 0.004 + L * 9);
+      const tree = Math.max(0, 1 - Math.abs(((xx * (0.012 + L * 0.004)) % 1) - 0.5) * 6) * (0.4 + 0.6 * hash(Math.floor(xx * (0.012 + L * 0.004)) + L * 50));
+      g.lineTo(x, base - n * 60 * k - tree * 150 * k);
+    }
+    g.lineTo(W, H); g.closePath(); g.fill();
+  });
+  const a = out3(seg(lt, 0.3, 1.3)), lx = 600, ly = 440;
+  g.save(); g.globalAlpha = a; g.translate(0, (1 - a) * 20);
+  g.lineWidth = 4; g.strokeStyle = 'rgba(237,238,240,0.35)'; g.beginPath(); g.roundRect(lx, ly - 58, 64, 64, 12); g.stroke();
+  g.strokeStyle = 'rgba(237,238,240,0.7)'; g.beginPath(); g.roundRect(lx + 20, ly - 78, 64, 64, 12); g.stroke();
+  g.fillStyle = C.mintL; g.beginPath(); g.roundRect(lx + 40, ly - 98, 64, 64, 12); g.fill();
+  g.restore();
+  text('nomono3d', lx + 140, ly - 12, 110, 600, '#EDEEF0', a, { track: -2 });
+  text('Open source. Runs in the browser.', lx, ly + 84, 42, 400, '#B8BDBA', out3(seg(lt, 1.0, 1.8)));
+  text('github.com/yevheniikhan/nomono3d', lx, ly + 148, 30, 500, C.mintL, out3(seg(lt, 1.6, 2.4)));
+  const fade = seg(lt, 5.1, 6.0);
+  if (fade > 0) fillp([[0, 0], [W, 0], [W, H], [0, H]], '#000', fade);
+}
+
+const SC = [[0, 9.5, s0], [9.5, 23, s1], [23, 33, s2], [33, 43.5, s3], [43.5, 55, s4], [55, 67, s5], [67, 76.5, s6], [76.5, 82.5, s7]];
+function render(t) {
+  T = t;
+  COL = ease(t, 46.5, 52.5);
+  fillp([[0, 0], [W, 0], [W, H], [0, H]], C.paper, 1);
+  const X = 0.55;
+  for (const [a, b, fn] of SC) {
+    if (t < a - X || t > b + X) continue;
+    const inA = a === 0 ? 1 : io(seg(t, a - X, a + X)), outA = b === DUR ? 1 : 1 - io(seg(t, b - X, b + X));
+    const al = Math.min(inA, outA);
+    if (al <= 0) continue;
+    const sc = inA < 1 ? lerp(1.02, 1, inA) : outA < 1 ? lerp(0.985, 1, outA) : 1;
+    g.save(); g.globalAlpha = al; g.translate(960, 540); g.scale(sc, sc); g.translate(-960, -540);
+    fn(t - a); g.restore();
+  }
+}
+window.render = render; window.DURATION = DUR;
+document.fonts.load(`600 40px ${FONT}`).then(() => document.fonts.load(`400 40px ${FONT}`)).then(() => document.fonts.load(`500 40px ${FONT}`)).then(() => document.fonts.ready).then(() => {
+  window.READY = true; render(+(new URLSearchParams(location.search).get('t') || 0));
+});
+</script>
+</body></html>

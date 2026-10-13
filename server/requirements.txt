@@ -1,0 +1,10 @@
+# nomono3d server. PyTorch and torchvision are not listed: Colab has them; elsewhere install
+# the builds for your GPU from https://pytorch.org first.
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+numpy>=1.24
+pillow>=10.0
+scipy>=1.10
+transformers>=4.45
+gdown>=5.1

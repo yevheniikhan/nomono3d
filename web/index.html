@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#08090A">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>nomono3d — 360° panoramas and photos in depth</title>
+<meta name="description" content="Turn flat 360° panoramas and ordinary photos into explorable 3D with AI depth maps: parallax in the browser, 3D objects placed on real depth.">
+<!-- three.js is vendored in lib/ (works offline). To load it from a CDN instead, use
+     https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js and .../examples/jsm/ -->
+<script type="importmap">
+{ "imports": {
+    "three": "./lib/three/build/three.module.js",
+    "three/addons/": "./lib/three/examples/jsm/"
+} }
+</script>
+<link rel="stylesheet" href="lib/fonts/plex.css">
+<style>
+/* [hidden] must win over display:flex/grid classes */
+[hidden]{display:none !important}
+:root{
+  color-scheme:dark;
+  /* one dark system for the site and the viewer: near-black layers, hairline borders, one mint accent */
+  --bg:#08090A; --bg-1:#0D0E10; --bg-2:#121316; --bg-3:#18191D; --bg-4:#1F2025;
+  --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.12); --line-3:rgba(255,255,255,.2);
+  --ink:#EDEEF0; --ink-2:#B5B8BF; --muted:#80848D; --faint:#5A5E66;
+  --accent:#5CD2B0; --accent-hi:#7BE0C3; --accent-ink:#03140E; --accent-soft:rgba(92,210,176,.12); --accent-line:rgba(92,210,176,.35);
+  --warn:#F2907C; --ok:#5CD2B0;
+  /* viewer glass over the image */
+  --glass:rgba(13,14,16,.68); --glass-hi:rgba(13,14,16,.84); --g-line:rgba(255,255,255,.09); --g-ink:#EDEEF0; --g-dim:rgba(237,238,240,.58);
+  --font:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --r-sm:6px; --r-md:10px; --r-lg:14px;
+  --shadow:0 0 0 1px rgba(0,0,0,.4),0 18px 48px -12px rgba(0,0,0,.6);
+  --hi:inset 0 1px 0 rgba(255,255,255,.05);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--font); font-size:14px; line-height:1.55; letter-spacing:-.003em;
+  overscroll-behavior:none; touch-action:manipulation; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+body.viewing{background:#000;overflow:hidden}
+button,input,select,textarea{font:inherit;letter-spacing:inherit}
+:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
+::selection{background:var(--accent-soft)}
+.num{font-variant-numeric:tabular-nums}
+kbd{font:500 11px var(--font);color:var(--ink-2);background:var(--bg-3);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:5px;padding:1px 6px;min-width:20px;text-align:center;display:inline-block;line-height:1.5}
+
+/* ─── start screen ─── */
+#load{min-height:100%;display:flex;flex-direction:column;position:relative;isolation:isolate;
+  background:radial-gradient(900px 420px at 50% -120px,rgba(92,210,176,.10),transparent 70%),radial-gradient(700px 360px at 85% 0,rgba(120,140,255,.05),transparent 70%)}
+#load::before{content:'';position:absolute;inset:0 0 auto;height:520px;z-index:-1;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:56px 56px;
+  -webkit-mask-image:radial-gradient(ellipse 70% 100% at 50% 0,#000 20%,transparent 75%);mask-image:radial-gradient(ellipse 70% 100% at 50% 0,#000 20%,transparent 75%)}
+.top{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:16px;height:60px;padding:0 clamp(16px,4vw,40px);
+  border-bottom:1px solid var(--line);background:rgba(8,9,10,.72);-webkit-backdrop-filter:blur(14px) saturate(1.4);backdrop-filter:blur(14px) saturate(1.4)}
+.brand{display:flex;align-items:center;gap:10px;margin:0;font-size:15px;font-weight:600;letter-spacing:-.02em;color:var(--ink)}
+.brand svg{width:22px;height:22px;display:block}
+.topr{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2)}
+#engine{display:flex;align-items:center;gap:8px;white-space:nowrap;padding:0 10px;color:var(--muted);font-size:12.5px}
+@media (max-width:640px){#engine{font-size:0;gap:0;padding:0 6px}}
+#engine::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--faint)}
+#engine.on::before{background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft),0 0 12px rgba(92,210,176,.6)}
+.link,.navb{background:none;border:0;padding:6px 10px;border-radius:7px;color:var(--ink-2);cursor:pointer;font-size:13px;font-weight:500;text-decoration:none;transition:color .15s,background .15s}
+.link:hover,.navb:hover{color:var(--ink);background:var(--bg-3)}
+.kbtn{display:flex;align-items:center;gap:10px;height:32px;padding:0 6px 0 11px;margin-left:4px;border-radius:8px;border:1px solid var(--line-2);background:var(--bg-2);
+  color:var(--muted);cursor:pointer;font-size:12.5px;box-shadow:var(--hi);transition:border-color .15s,color .15s}
+.kbtn:hover{border-color:var(--line-3);color:var(--ink-2)}
+.kbtn svg{width:14px;height:14px}
+.kbtn kbd{font-size:10.5px;padding:0 5px}
+@media (max-width:640px){.kbtn .kl,.kbtn kbd{display:none}.kbtn{padding:0 9px}}
+.hero{max-width:1440px;width:100%;margin:0 auto;padding:clamp(40px,7vw,88px) clamp(20px,4vw,40px) clamp(24px,4vw,40px)}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;height:26px;padding:0 10px 0 4px;border:1px solid var(--line-2);border-radius:999px;background:var(--bg-1);
+  font-size:12px;color:var(--ink-2);box-shadow:var(--hi)}
+.eyebrow b{font-weight:500;color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:0 8px;line-height:18px;font-size:11px}
+.hero h1{margin:18px 0 0;max-width:15ch;font-size:clamp(34px,5.6vw,60px);line-height:1.04;font-weight:600;letter-spacing:-.035em;
+  background:linear-gradient(180deg,#fff 30%,rgba(255,255,255,.55));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{margin:18px 0 0;max-width:58ch;font-size:clamp(15px,1.4vw,17px);color:var(--ink-2);line-height:1.6}
+.hero p b{color:var(--ink);font-weight:500}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.pills span{font-size:12px;color:var(--muted);padding:4px 10px;border-radius:999px;border:1px solid var(--line)}
+.wrap{flex:1;display:grid;grid-template-columns:minmax(300px,400px) 1fr;gap:clamp(24px,4vw,48px);
+  padding:0 clamp(20px,4vw,40px) clamp(28px,4vw,48px);max-width:1440px;width:100%;margin:0 auto;align-items:start}
+@media (max-width:860px){.wrap{grid-template-columns:1fr}}
+.wrap:has(#libBox[hidden]){grid-template-columns:minmax(300px,440px)}
+.intro{margin:0 0 20px;color:var(--ink-2);font-size:14px;max-width:60ch}
+.intro b{color:var(--ink);font-weight:600}
+h2.h{font-size:15px;font-weight:600;margin:0;letter-spacing:-.015em;color:var(--ink)}
+.manual{display:flex;flex-direction:column;gap:18px;background:linear-gradient(180deg,var(--bg-2),var(--bg-1));border:1px solid var(--line-2);border-radius:var(--r-lg);padding:20px;
+  box-shadow:var(--hi),0 24px 60px -24px rgba(0,0,0,.7)}
+@media (min-width:861px){.manual{position:sticky;top:84px}}
+.manual .intro{font-size:13px;color:var(--muted)}
+.seg{display:grid;grid-template-columns:1fr 1fr;padding:3px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
+.seg button{padding:7px 10px;background:transparent;color:var(--muted);border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;transition:color .15s,background .15s}
+.seg button:hover{color:var(--ink-2)}
+.seg button.on{background:var(--bg-4);color:var(--ink);box-shadow:var(--hi),0 1px 2px rgba(0,0,0,.4)}
+.field{display:flex;flex-direction:column;gap:8px}
+.flabel{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;font-weight:500;color:var(--ink)}
+.flabel small{font-weight:400;color:var(--muted);font-size:12px}
+.slot{display:block;position:relative;cursor:pointer;margin:0 auto;width:100%}
+.slot input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.frame{position:relative;aspect-ratio:2/1;border:1px dashed var(--line-2);border-radius:var(--r-md);
+  background:var(--bg) center/contain no-repeat;overflow:hidden;transition:border-color .2s,background-color .2s}
+.slot:hover .frame,.slot:focus-within .frame{border-color:var(--accent-line);background-color:rgba(92,210,176,.03)}
+.frame.filled{border-style:solid;border-color:var(--line-2);background-color:#000}
+.frame svg{position:absolute;inset:0;width:100%;height:100%}
+.frame svg g{stroke:rgba(255,255,255,.06)}
+.frame svg .ax{stroke:rgba(255,255,255,.14)}
+.frame.filled svg{display:none}
+.grid-photo{display:none} body[data-kind=photo] .grid-pano{display:none} body[data-kind=photo] .grid-photo{display:block}
+.hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 16px;
+  font-size:12.5px;color:var(--ink-2);pointer-events:none}
+.hint span{background:var(--bg-2);padding:4px 10px;border-radius:999px;border:1px solid var(--line)}
+.frame.filled .hint{display:none}
+.meta{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:var(--muted);min-height:20px}
+.meta b{font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+.meta .acts{display:flex;align-items:center;gap:12px}
+.tag{color:var(--muted)}
+.tag.stereo,.tag.depth{color:var(--accent)}
+.gen{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-size:12px;font-weight:500}
+.gen:hover{color:var(--accent-hi)}
+.gen:disabled{opacity:.4}
+.meta .x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:12px;padding:0}
+.meta .x:hover{color:var(--warn)}
+.btnrow{display:flex;gap:10px}
+#view{flex:1;height:40px;padding:0 16px;background:var(--accent);color:var(--accent-ink);border:0;border-radius:9px;
+  font-size:14px;font-weight:600;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 0 1px rgba(92,210,176,.5),0 8px 24px -8px rgba(92,210,176,.45);transition:background .15s,opacity .15s,box-shadow .15s}
+#view:not(:disabled):hover{background:var(--accent-hi)}
+#view:disabled{opacity:.3;cursor:default;box-shadow:none;background:var(--bg-4);color:var(--muted)}
+.note{font-size:12.5px;line-height:1.5;color:var(--muted);margin:0;min-height:20px}
+#cap{display:none}
+
+/* ─── library ─── */
+#libBox{display:flex;flex-direction:column;gap:14px;min-width:0}
+.libhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+#libCount{font-size:12.5px;color:var(--muted)}
+.albums{display:flex;flex-wrap:wrap;gap:4px;padding-bottom:4px}
+.albums button{cursor:pointer;height:28px;padding:0 11px;background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:999px;font-size:12.5px;
+  transition:color .15s,border-color .15s,background .15s}
+.albums button:hover{color:var(--ink);border-color:var(--line-2)}
+.albums button.on{color:var(--ink);background:var(--bg-3);border-color:var(--line-3)}
+.albums span{flex-basis:100%;height:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.card{position:relative;cursor:pointer;text-align:left;padding:6px 6px 10px;color:var(--ink);background:var(--bg-1);border:1px solid var(--line);border-radius:12px;
+  transition:border-color .2s,background .2s,transform .2s}
+.card:hover{border-color:var(--line-2);background:var(--bg-2)}
+.card .th{position:relative;aspect-ratio:2/1;background:var(--bg-3);border-radius:8px;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
+.card .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .3s,transform .5s cubic-bezier(.2,.7,.2,1)}
+.card .th img.ok{opacity:1}
+.card:hover .th img.ok{transform:scale(1.03)}
+.card:focus-visible{outline:none;border-color:var(--accent-line)}
+.card .th span[hidden]{display:none}
+.card .ti{font-size:13.5px;font-weight:500;padding:10px 4px 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em}
+.card .tg{font-size:11.5px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;padding:0 4px;font-variant-numeric:tabular-nums}
+.card .tg .s,.card .tg .d,.card .tg .o{color:var(--accent)}
+.card.sel{border-color:var(--accent-line)}
+.libmsg{font-size:12.5px;color:var(--muted)}
+.foot{padding:20px clamp(16px,4vw,40px);border-top:1px solid var(--line);font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.foot a{color:var(--ink-2);text-decoration:none}
+.foot a:hover{color:var(--ink)}
+
+/* ─── viewer ─── */
+#stage{position:fixed;left:0;top:0;width:100%;background:#000;display:none;color:var(--g-ink);
+  touch-action:none;z-index:999;height:100vh;height:calc(var(--vh,1vh)*100);height:100dvh}
+#stage.on{display:block}
+#stage:fullscreen{height:100%;width:100%}
+#stage:-webkit-full-screen{height:100%;width:100%}
+#gl{display:block;width:100%;height:100%}
+#hud{position:absolute;inset:0;pointer-events:none}
+.hudrow{position:absolute;top:calc(env(safe-area-inset-top) + 12px);display:flex;gap:1px;align-items:center;pointer-events:auto;
+  padding:3px;background:var(--glass);border:1px solid var(--g-line);border-radius:11px;box-shadow:0 8px 28px -10px rgba(0,0,0,.6);
+  -webkit-backdrop-filter:blur(16px) saturate(1.3);backdrop-filter:blur(16px) saturate(1.3)}
+#hudL{left:12px} #hudR{right:12px}
+.ib,.chipbtn{height:32px;min-width:32px;padding:0 11px;background:transparent;border:0;border-radius:8px;cursor:pointer;
+  color:var(--g-ink);font-size:12.5px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s,color .15s}
+.ib{padding:0 9px}
+.ib:hover,.chipbtn:hover{background:rgba(255,255,255,.08)}
+.ib.on,.chipbtn.on,#modeBtn.locked,#dbtn.on,#edBtn.on{background:rgba(255,255,255,.14);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+#edBtn.on svg,#dbtn.on::before{color:var(--accent)}
+#headBtn.busy{opacity:.5}
+.ib svg{width:17px;height:17px;display:block}
+@media (max-width:820px){.ib span{display:none}}
+#fsbtn .out{display:none}
+#fsbtn.is-fs .in{display:none}
+#fsbtn.is-fs .out{display:block}
+.chipbtn:disabled{opacity:.35;pointer-events:none}
+#readout{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 14px);width:min(560px,calc(100% - 24px));
+  display:flex;flex-direction:column;gap:10px;padding:12px 16px 10px;background:var(--glass);border:1px solid var(--g-line);border-radius:13px;
+  box-shadow:0 12px 36px -12px rgba(0,0,0,.6);-webkit-backdrop-filter:blur(16px) saturate(1.3);backdrop-filter:blur(16px) saturate(1.3);opacity:0;transition:opacity .4s;pointer-events:none}
+#readout.show{opacity:1;pointer-events:auto}
+.sliders{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 22px}
+@media (max-width:520px){.sliders{grid-template-columns:1fr}}
+.slider{display:grid;grid-template-columns:56px 1fr;align-items:center;gap:10px;transition:opacity .3s}
+.slider label{font-size:12px;color:var(--g-dim)}
+.slider.dim,.chip.dim{opacity:.4}
+input[type=range]{width:100%;height:22px;-webkit-appearance:none;appearance:none;background:transparent;margin:0;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:3px;background:rgba(255,255,255,.16);border-radius:3px}
+input[type=range]::-moz-range-track{height:3px;background:rgba(255,255,255,.16);border-radius:3px}
+input[type=range]::-moz-range-progress{height:3px;background:var(--accent);border-radius:3px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;margin-top:-5.5px;box-shadow:0 0 0 3px rgba(0,0,0,.25),0 1px 4px rgba(0,0,0,.5);transition:transform .15s}
+input[type=range]:active::-webkit-slider-thumb{transform:scale(1.15)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:#fff}
+.rowfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--g-line);padding-top:9px}
+.chips{display:flex;gap:6px}
+.chip{cursor:pointer;height:28px;padding:0 11px;background:transparent;color:var(--g-ink);border:1px solid var(--g-line);border-radius:7px;font-size:12px;font-weight:500;
+  transition:background .15s,color .15s,opacity .3s,border-color .15s}
+.chip:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.16)}
+.chip.on{background:var(--accent-soft);color:var(--accent-hi);border-color:var(--accent-line)}
+#info{font-size:11.5px;color:var(--g-dim);text-align:right;flex:1;min-width:180px;font-variant-numeric:tabular-nums;line-height:1.45}
+#fshint{position:absolute;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 62px);max-width:80vw;
+  padding:7px 13px;background:var(--glass-hi);border:1px solid var(--g-line);border-radius:9px;font-size:12.5px;color:var(--g-ink);text-align:center;
+  opacity:0;transition:opacity .4s;pointer-events:none;z-index:5;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+#fshint:empty{display:none}
+#fshint.show{opacity:1}
+#busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:radial-gradient(600px 300px at 50% 40%,rgba(92,210,176,.06),transparent),var(--bg);text-align:center;z-index:20;color:var(--g-ink)}
+#busy.on{display:flex}
+#busyTitle{font-size:15px;font-weight:500;margin-bottom:6px;letter-spacing:-.01em}
+#busyTitle::before{content:'';display:block;width:26px;height:26px;margin:0 auto 18px;border-radius:50%;border:2px solid rgba(255,255,255,.1);border-top-color:var(--accent);animation:spin .9s linear infinite}
+#busy.err #busyTitle::before{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+#busyStep{font-size:12.5px;color:var(--g-dim);font-variant-numeric:tabular-nums}
+#busyStep::first-letter{text-transform:uppercase}
+#busy .errmsg{max-width:min(560px,86vw);text-align:left;font-size:13px;line-height:1.6;color:rgba(237,238,240,.8);white-space:pre-wrap;margin:12px auto 18px}
+#busy .chip{pointer-events:auto}
+#probe{position:absolute;pointer-events:none;font-size:11.5px;font-weight:500;color:#fff;padding:3px 7px;border-radius:6px;background:var(--glass-hi);border:1px solid var(--g-line);
+  transform:translate(14px,-26px);display:none;z-index:4;white-space:nowrap;font-variant-numeric:tabular-nums}
+#probe.on{display:block}
+#drop{position:absolute;inset:12px;border:1.5px dashed var(--accent-line);border-radius:16px;display:none;align-items:center;justify-content:center;
+  font-size:15px;font-weight:500;color:#fff;background:rgba(8,9,10,.66);z-index:30}
+#drop.on{display:flex}
+
+/* popover panels in the viewer */
+.pop{position:absolute;top:calc(env(safe-area-inset-top) + 58px);right:12px;width:min(300px,calc(100% - 24px));pointer-events:auto;z-index:7;
+  padding:12px;background:var(--glass-hi);border:1px solid var(--g-line);border-radius:13px;color:var(--g-ink);font-size:13px;box-shadow:var(--shadow);
+  -webkit-backdrop-filter:blur(18px) saturate(1.3);backdrop-filter:blur(18px) saturate(1.3);animation:popin .16s ease-out}
+@keyframes popin{from{opacity:0;transform:translateY(-4px) scale(.985)}}
+.pophead{font-size:11px;font-weight:600;color:var(--g-dim);margin:0 2px 10px;text-transform:uppercase;letter-spacing:.06em}
+.modes{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-bottom:10px}
+.modes button{height:30px;padding:0 4px;font-size:12px;font-weight:500;border-radius:7px;border:1px solid var(--g-line);background:transparent;color:var(--g-ink);cursor:pointer;transition:background .15s,border-color .15s}
+.modes button:hover{background:rgba(255,255,255,.07)}
+.modes button.on{background:var(--accent-soft);color:var(--accent-hi);border-color:var(--accent-line)}
+.prow{display:grid;grid-template-columns:78px 1fr 56px;align-items:center;gap:8px;margin:4px 2px}
+.prow label{font-size:12px;color:var(--g-dim)}
+.prow output{font-size:12px;text-align:right;font-variant-numeric:tabular-nums;color:var(--g-ink)}
+.pbtn{width:100%;margin-top:8px;height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--g-line);background:rgba(255,255,255,.03);color:var(--g-ink);font-size:12.5px;font-weight:500;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;transition:background .15s,border-color .15s}
+.pbtn:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16)}
+.pbtn.pri{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+.pbtn.pri:hover{background:var(--accent-hi)}
+.pbtn.ghost{background:transparent;border-style:dashed}
+.pbtn:disabled{opacity:.4;cursor:default}
+.pbtn kbd{margin-left:auto}
+body.editing .pop{right:calc(min(340px,92vw) + 12px)}
+.pop.wide{width:min(340px,calc(100% - 24px));max-height:calc(100% - 130px);overflow:auto}
+.exsec{padding:12px 2px;border-top:1px solid var(--g-line)}
+.exsec:first-of-type{border-top:0;padding-top:0}
+.exh{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;font-weight:600;margin-bottom:6px;letter-spacing:-.005em}
+.exmeta{font-weight:400;font-size:11.5px;color:var(--g-dim);font-variant-numeric:tabular-nums}
+.exnote{font-size:11.5px;color:var(--g-dim);margin-top:7px;line-height:1.5}
+.exnote.err{color:var(--warn)}
+.exnote.warn{color:#F3C77A}
+.segs{display:flex;gap:2px;padding:2px;background:rgba(0,0,0,.25);border:1px solid var(--g-line);border-radius:8px;margin:6px 0}
+.segs button{flex:1;height:26px;padding:0 4px;font:500 12px var(--font);border:0;border-radius:6px;background:transparent;color:var(--g-dim);cursor:pointer;white-space:nowrap;transition:color .15s,background .15s}
+.segs button:hover{color:var(--g-ink)}
+.segs button.on{background:rgba(255,255,255,.12);color:#fff;box-shadow:var(--hi)}
+#recStop{display:none;position:absolute;left:50%;top:calc(env(safe-area-inset-top) + 14px);transform:translateX(-50%);z-index:9;align-items:center;gap:8px;
+  height:32px;padding:0 14px;border-radius:999px;border:1px solid var(--g-line);background:var(--glass-hi);color:var(--g-ink);font:500 12px var(--font);cursor:pointer}
+#recStop .dot{width:8px;height:8px;border-radius:50%;background:#F0524A;box-shadow:0 0 10px #F0524A;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.25}}
+body.recording #recStop{display:flex}
+body.recording #hud,body.recording #readout,body.recording .pop,body.recording #editor,body.recording #measureBar{visibility:hidden}
+
+/* dialogs: VR share link, command palette */
+dialog{color:var(--ink);font:13px var(--font)}
+#shareDlg{width:min(700px,calc(100% - 24px));padding:20px;border:1px solid var(--line-2);border-radius:16px;background:var(--bg-1);box-shadow:var(--shadow),var(--hi)}
+dialog::backdrop{background:rgba(4,5,6,.6);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+dialog[open]{animation:popin .18s ease-out}
+.dlghead{display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:600;letter-spacing:-.015em}
+.dlgsub{color:var(--muted);margin:6px 0 16px;line-height:1.55;max-width:62ch}
+.dlggrid{display:grid;grid-template-columns:1fr 252px;gap:20px}
+@media (max-width:640px){.dlggrid{grid-template-columns:1fr}}
+.dlgopts{display:flex;flex-direction:column;gap:2px}
+.optrow{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:8px}
+.optl{font-size:12px;color:var(--muted)}
+.chk{display:flex;align-items:center;gap:9px;margin:7px 2px;font-size:12.5px;color:var(--ink-2);cursor:pointer}
+input[type=checkbox]{accent-color:var(--accent);width:14px;height:14px}
+.dlgqr{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px;min-height:120px}
+#shareQR{display:block;width:232px;height:232px;border-radius:8px;image-rendering:pixelated;margin:0 auto}
+.linkrow{display:flex;gap:4px;margin-top:10px}
+.linkrow input{flex:1;min-width:0;height:32px;padding:0 9px;border-radius:8px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink);font:12px var(--mono)}
+.linkrow .pbtn{width:auto;margin:0;padding:0 10px}
+.ib.sm{width:28px;height:28px;min-width:28px;color:var(--muted)}
+#palette{width:min(620px,calc(100% - 24px));margin-top:12vh;padding:0;border:1px solid var(--line-2);border-radius:14px;background:rgba(18,19,22,.92);
+  box-shadow:var(--shadow),var(--hi);-webkit-backdrop-filter:blur(20px) saturate(1.4);backdrop-filter:blur(20px) saturate(1.4);overflow:hidden}
+.palin{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line)}
+.palin svg{width:16px;height:16px;color:var(--muted);flex:none}
+#palInput{flex:1;height:52px;border:0;background:transparent;color:var(--ink);font-size:15px;outline:none}
+#palInput::placeholder{color:var(--faint)}
+#palList{max-height:min(420px,56vh);overflow:auto;padding:6px}
+.palg{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;padding:10px 10px 4px}
+.pali{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--ink-2);cursor:pointer;text-align:left;font-size:13.5px}
+.pali.on{background:var(--bg-4);color:var(--ink)}
+.pali .pn{flex:none;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pali .ph{flex:1;min-width:0;font-size:12px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pali kbd{margin-left:auto}
+.pale{padding:22px;text-align:center;color:var(--muted)}
+.palfoot{display:flex;gap:16px;padding:9px 16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--faint)}
+.palfoot kbd{font-size:10px;margin-right:4px}
+
+/* measuring */
+#measureLayer{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
+.mlabel{position:absolute;left:0;top:0;display:flex;gap:8px;align-items:baseline;padding:3px 8px;border-radius:7px;background:rgba(10,11,12,.82);border:1px solid rgba(246,211,101,.4);
+  color:#F6D365;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.mlabel b{font-weight:600;color:#FBE7A6}
+.mlabel span{color:rgba(246,211,101,.75);font-size:11px}
+#measureBar{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 14px);z-index:8;display:flex;align-items:center;gap:6px;
+  padding:4px 4px 4px 14px;background:var(--glass-hi);border:1px solid rgba(246,211,101,.35);border-radius:11px;font-size:12.5px;color:var(--g-ink);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+#measureBar .mt{margin-right:8px;color:#FBE7A6}
+#measureBar .pbtn{width:auto;margin:0;height:28px}
+body.measuring #readout{display:none}
+body.measuring #stage,body.measuring #gl{cursor:crosshair}
+
+/* ─── objects editor ─── */
+#editor{position:absolute;top:0;right:0;bottom:0;width:min(340px,92vw);background:rgba(11,12,14,.92);color:var(--g-ink);
+  border-left:1px solid var(--g-line);overflow:auto;padding:calc(env(safe-area-inset-top) + 66px) 16px calc(env(safe-area-inset-bottom) + 28px);
+  font-size:13px;z-index:6;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);touch-action:pan-y;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.15) transparent}
+#editor[hidden]{display:none}
+@media (orientation:portrait) and (max-width:760px){
+  #editor{top:auto;left:0;width:auto;height:54vh;border-left:0;border-top:1px solid var(--g-line);padding-top:14px;border-radius:16px 16px 0 0}
+}
+#editor h3{font-size:14px;font-weight:600;color:var(--g-ink);margin:6px 0 10px;display:flex;justify-content:space-between;align-items:center;letter-spacing:-.01em}
+#edCount{font-size:11.5px;font-weight:500;color:var(--g-dim);background:rgba(255,255,255,.07);border-radius:999px;padding:0 7px}
+#edCount:empty{display:none}
+#editor details{border-top:1px solid var(--g-line);padding:2px 0}
+#editor summary{cursor:pointer;list-style:none;padding:11px 0;font-size:12.5px;font-weight:500;color:var(--g-ink);display:flex;justify-content:space-between}
+#editor summary::-webkit-details-marker{display:none}
+#editor summary::after{content:'';width:7px;height:7px;margin:4px 3px 0 0;border-right:1.5px solid var(--g-dim);border-bottom:1.5px solid var(--g-dim);transform:rotate(-45deg);transition:transform .15s}
+#editor details[open] summary::after{transform:rotate(45deg)}
+.erow{display:flex;align-items:center;gap:8px;margin:7px 0;min-height:26px}
+.erow>label:first-child{flex:0 0 96px;color:var(--g-dim);font-size:12px}
+.erow input[type=range]{flex:1;width:auto;min-width:60px}
+.erow output{flex:0 0 56px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
+.erow input[type=number],.erow input[type=text],.erow select,.erow textarea{flex:1;min-width:0;height:28px;background:rgba(255,255,255,.04);color:var(--g-ink);
+  border:1px solid var(--g-line);border-radius:7px;font-size:12.5px;padding:0 8px}
+.erow textarea{height:auto;padding:6px 8px}
+.erow select option{color:var(--ink);background:var(--bg-2)}
+.erow textarea{min-height:48px;resize:vertical}
+.erow input[type=color]{width:34px;height:26px;border:1px solid var(--g-line);border-radius:6px;background:none;padding:0}
+.ebtns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.eb{cursor:pointer;height:28px;padding:0 10px;background:rgba(255,255,255,.03);color:var(--g-ink);border:1px solid var(--g-line);border-radius:7px;font-size:12px;font-weight:500;line-height:1.3;
+  display:inline-flex;align-items:center;gap:6px;transition:background .15s,border-color .15s}
+.eb:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16)}
+.eb.on{background:var(--accent-soft);color:var(--accent-hi);border-color:var(--accent-line)}
+.eb.warn{color:var(--warn);border-color:rgba(242,144,124,.35)}
+.eb.go{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+.eb.go:hover{background:var(--accent-hi)}
+.eb:disabled{opacity:.35;cursor:default}
+.olist{display:flex;flex-direction:column;gap:2px;margin:6px 0}
+.orow{display:flex;align-items:center;gap:6px;height:32px;padding:0 8px;border-radius:7px;cursor:pointer}
+.orow:hover{background:rgba(255,255,255,.05)}
+.orow.sel{background:rgba(255,255,255,.1)}
+.orow .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.orow button{background:none;border:0;color:var(--g-dim);cursor:pointer;font-size:12px;padding:2px 4px}
+.mlist{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}
+.mitem{border:1px solid var(--g-line);border-radius:9px;padding:6px;cursor:pointer;font-size:12px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;background:rgba(255,255,255,.02);color:var(--g-ink);text-align:left}
+.mitem:hover{border-color:rgba(255,255,255,.2)}
+.mitem .mt{aspect-ratio:4/3;background:#16171a center/cover no-repeat;margin-bottom:6px;border-radius:6px}
+.small{color:var(--g-dim);font-size:12px;line-height:1.55}
+.warnline{color:var(--warn)}
+.okline{color:var(--accent)}
+#edClose{position:absolute;top:calc(env(safe-area-inset-top) + 16px);right:12px;color:var(--g-dim)}
+@media (orientation:portrait) and (max-width:760px){ #edClose{top:8px} #edClose + h3{padding-right:42px} }
+body.editing #hudR{right:calc(min(340px,92vw) + 12px)}
+@media (orientation:portrait) and (max-width:760px){ body.editing #hudR{right:12px} body.editing #readout{display:none} }
+
+/* ─── help ─── */
+#help{position:fixed;inset:0;background:var(--bg);color:var(--ink);z-index:2000;display:none;overflow:auto;-webkit-overflow-scrolling:touch}
+#help.on{display:block}
+#stage #help{position:absolute}
+#help .wrap2{max-width:760px;margin:0 auto;padding:0 clamp(16px,4vw,32px) 80px;font-size:14.5px;line-height:1.7;color:var(--ink-2)}
+#help .bar{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;background:rgba(8,9,10,.85);z-index:1;border-bottom:1px solid var(--line);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+#help .bar .t{font-size:14px;font-weight:600;color:var(--ink)}
+#help .bar .chips{gap:4px}
+#help .bar .chip{color:var(--ink-2);border-color:var(--line-2)}
+#help .bar .chip.on{background:var(--bg-4);color:var(--ink);border-color:var(--line-3)}
+#help h1{font-size:30px;letter-spacing:-.03em;color:var(--ink);margin:36px 0 8px;line-height:1.15}
+#help h2{font-size:19px;font-weight:600;margin:44px 0 12px;color:var(--ink);letter-spacing:-.02em}
+#help h3{font-size:15px;font-weight:600;margin:26px 0 8px;color:var(--ink)}
+#help b,#help strong{color:var(--ink);font-weight:600}
+#help code,#help kbd{font-family:var(--mono);font-size:12.5px;background:var(--bg-3);border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:var(--ink)}
+#help pre{font-family:var(--mono);font-size:12.5px;background:var(--bg-1);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;line-height:1.6;color:var(--ink)}
+#help table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0}
+#help td,#help th{border-bottom:1px solid var(--line);padding:9px 10px 9px 0;text-align:left;vertical-align:top}
+#help th{color:var(--muted);font-weight:500;font-size:12.5px}
+#help a{color:var(--accent);text-decoration:none}
+#help a:hover{text-decoration:underline;text-underline-offset:3px}
+#help .toc{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 0}
+#help .toc a{font-size:12.5px;text-decoration:none;border:1px solid var(--line-2);border-radius:999px;padding:4px 11px;color:var(--ink-2);background:var(--bg-1)}
+#help .toc a:hover{border-color:var(--accent-line);color:var(--ink)}
+#help .note2{border:1px solid var(--accent-line);background:var(--accent-soft);padding:10px 14px;border-radius:10px;color:var(--ink);margin:14px 0}
+#help .warn2{border:1px solid rgba(242,144,124,.35);background:rgba(242,144,124,.08);padding:10px 14px;border-radius:10px;color:var(--ink);margin:14px 0}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ─── VR headset mode (xr.js) ─── */
+#vrBtn{letter-spacing:.04em}
+#vrEnter{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;z-index:25;background:rgba(0,0,0,.42)}
+#vrEnter .box{display:flex;flex-direction:column;align-items:center;gap:16px;width:min(420px,100%);padding:28px 28px 20px;text-align:center;
+  background:var(--glass-hi);border:1px solid var(--g-line);border-radius:16px;color:var(--g-ink);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+#vrEnter .ttl{font-size:14px;font-weight:500;color:var(--g-dim);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#vrEnter .go{width:100%;padding:20px 24px;font-size:21px;font-weight:600;letter-spacing:-.01em;background:var(--accent);color:var(--accent-ink);border:0;border-radius:12px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+#vrEnter .go:hover{background:var(--accent-hi)}
+#vrEnter .sub{font-size:12.5px;color:var(--g-dim)}
+#vrEnter .skip{background:none;border:0;padding:6px 10px;color:var(--g-ink);font-size:13px;cursor:pointer;text-decoration:underline;text-decoration-color:var(--g-line);text-underline-offset:4px}
+body.xr #hud,body.xr #vrEnter{display:none}
+</style>
+</head>
+<body>
+
+<main id="load">
+  <header class="top">
+    <h1 class="brand">
+      <svg viewBox="0 0 26 26" aria-hidden="true"><rect x="2.5" y="8.5" width="13" height="13" rx="2.5" fill="none" stroke="rgba(255,255,255,.32)" stroke-width="1.5"/><rect x="6.5" y="4.5" width="13" height="13" rx="2.5" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.5"/><rect x="10.5" y=".5" width="13" height="13" rx="2.5" fill="#5CD2B0"/></svg>
+      nomono3d
+    </h1>
+    <div class="topr"><span id="engine">Checking for a depth server</span><span id="cap"></span>
+      <button class="link" id="helpOpen" type="button">Docs</button>
+      <a class="navb" href="https://github.com/yevheniikhan/nomono3d" target="_blank" rel="noopener">GitHub</a>
+      <button class="kbtn" type="button" data-palette aria-label="Search and commands"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg><span class="kl">Search</span><kbd>⌘K</kbd></button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <span class="eyebrow"><b>New</b>Stereo and 360° export, VR headset links</span>
+    <h1>Flat images, rebuilt in depth.</h1>
+    <p>nomono3d turns <b>360° panoramas</b> and <b>ordinary photos</b> into geometry you can move through, using AI depth maps. Place 3D objects on real surfaces, measure, export stereo and 360° images, or step inside with a VR headset.</p>
+    <div class="pills"><span>DA360 for panoramas</span><span>Depth Anything V2 for photos</span><span>WebGL, no install</span><span>Open source, MIT</span></div>
+  </section>
+
+  <div class="wrap">
+    <section class="manual" aria-label="Open an image">
+      <div>
+        <h2 class="h">Open an image</h2>
+        <p class="intro" style="margin:4px 0 0">Drop a file anywhere, paste one, or pick from the library.</p>
+      </div>
+      <div class="seg" role="group" aria-label="Image type">
+        <button id="kindPano" type="button" class="on" aria-pressed="true">360° panorama</button>
+        <button id="kindPhoto" type="button" aria-pressed="false">Photo</button>
+      </div>
+      <div class="field">
+        <label class="slot"><input type="file" accept="image/*" id="filePano" aria-label="Image file">
+          <div class="frame" id="framePano">
+            <svg class="grid-pano" viewBox="0 0 360 180" preserveAspectRatio="none" aria-hidden="true">
+              <g fill="none" stroke-width="1" vector-effect="non-scaling-stroke">
+                <path d="M30 0V180M60 0V180M90 0V180M120 0V180M150 0V180M210 0V180M240 0V180M270 0V180M300 0V180M330 0V180M0 30H360M0 60H360M0 120H360M0 150H360"/>
+                <path class="ax" d="M180 0V180M0 90H360"/>
+              </g>
+            </svg>
+            <svg class="grid-photo" viewBox="0 0 300 150" preserveAspectRatio="none" aria-hidden="true">
+              <g fill="none" stroke-width="1" vector-effect="non-scaling-stroke">
+                <path d="M0 0L150 75M300 0L150 75M0 150L150 75M300 150L150 75M75 0L150 75M225 0L150 75M75 150L150 75M225 150L150 75"/>
+                <rect x="105" y="52.5" width="90" height="45"/><rect x="60" y="30" width="180" height="90"/>
+                <rect class="ax" x="128" y="64" width="44" height="22"/>
+              </g>
+            </svg>
+            <div class="hint"><span id="slotHint">Choose a 360° panorama</span></div>
+          </div>
+        </label>
+        <div class="meta"><span id="metaPano">2:1 mono, 1:1 or 4:1 stereo</span><span class="acts"><span class="tag" id="tagPano"></span><button class="gen" id="libSave" type="button" hidden title="Save the image and its depth map into the server library">Save to library</button></span></div>
+      </div>
+      <div class="field">
+        <div class="flabel"><span>Depth map</span><small>White is near</small></div>
+        <label class="slot"><input type="file" accept="image/*" id="fileDepth" aria-label="Depth map file">
+          <div class="frame" id="frameDepth" style="aspect-ratio:4/1">
+            <div class="hint"><span>Optional when AI depth is available</span></div>
+          </div>
+        </label>
+        <div class="meta"><span id="metaDepth">Without it, depth is estimated from a stereo pair</span><span class="acts"><span class="tag" id="tagDepth"></span><button class="gen" id="depthGen" type="button" hidden title="Estimate a depth map with AI now">Generate</button><button class="gen" id="depthSave" type="button" hidden title="Download the generated depth map">Download</button><button class="x" id="depthClear" type="button" title="Remove depth map" hidden>Remove</button></span></div>
+      </div>
+      <div class="btnrow"><button id="view" disabled>View in 3D</button></div>
+      <p class="note" id="note">Choose an image or open one from the library.</p>
+    </section>
+
+    <section id="libBox" hidden aria-label="Library">
+      <div class="libhead"><h2 class="h" id="libTitle">Library</h2><span id="libCount"></span></div>
+      <div id="libAlbums" class="albums"></div>
+      <div id="libGrid" class="grid"></div>
+      <div id="libMsg" class="libmsg"></div>
+    </section>
+  </div>
+
+  <footer class="foot"><span>nomono3d · open source under the MIT licence</span><span><a href="https://github.com/yevheniikhan/nomono3d">GitHub</a> · <a href="https://colab.research.google.com/github/yevheniikhan/nomono3d/blob/main/colab/nomono3d_colab.ipynb">Run on Colab</a></span></footer>
+</main>
+
+<div id="stage">
+  <canvas id="gl"></canvas>
+  <div id="hud">
+    <div class="hudrow" id="hudL">
+      <button id="modeBtn" class="chipbtn" aria-label="Toggle control mode">Live</button>
+      <button id="headBtn" class="chipbtn" aria-label="Head tracking">Head</button>
+      <button id="fitBtn" class="chipbtn" hidden aria-label="Fit or fill the screen">Fit</button>
+      <button id="vrBtn" class="chipbtn" hidden aria-label="View in a VR headset" title="VR headset">VR</button>
+    </div>
+    <div class="hudrow" id="hudR">
+      <button id="edBtn" class="ib" aria-label="3D objects" title="3D objects">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg><span>Objects</span>
+      </button>
+      <button id="exBtn" class="ib" aria-label="Export" aria-haspopup="dialog" aria-expanded="false" title="Export images, stereo, 360° and video">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/></svg><span>Export</span>
+      </button>
+      <button id="vrShareBtn" class="ib" aria-label="View in VR headset" title="View in a VR headset: link and QR code">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 014.5 7h15A1.5 1.5 0 0121 8.5v7a1.5 1.5 0 01-1.5 1.5h-4l-2-2.5h-3L8.5 17h-4A1.5 1.5 0 013 15.5z"/><circle cx="8" cy="11.5" r="1.6"/><circle cx="16" cy="11.5" r="1.6"/></svg><span>Headset</span>
+      </button>
+      <button id="dbtn" class="ib" aria-label="Depth view" aria-haspopup="dialog" aria-expanded="false" title="Depth view">Depth</button>
+      <button id="fsbtn" class="ib" aria-label="Toggle full screen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" aria-hidden="true">
+          <path class="in" d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6"/>
+          <path class="out" d="M3 9h6V3M21 9h-6V3M3 15h6v6M21 15h-6v6"/>
+        </svg>
+      </button>
+      <button id="hlpBtn" class="ib" aria-label="Help" title="Help">?</button>
+      <button id="close" class="ib" aria-label="Close" title="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div id="depthPanel" class="pop" hidden role="dialog" aria-label="Depth view">
+      <div class="pophead">Depth view</div>
+      <div id="depthModes" class="modes"></div>
+      <div class="prow" id="rowDepthMix"><label for="sDepthMix">Opacity</label><input type="range" id="sDepthMix" min="0" max="100" value="100"><output id="oDepthMix">100 %</output></div>
+      <div class="prow" id="rowDepthD" hidden><label for="sDepthD" id="lblDepthD">Distance</label><input type="range" id="sDepthD" min="0" max="1000" value="420"><output id="oDepthD"></output></div>
+      <div id="rowBgFill" hidden>
+        <div class="optrow"><span class="optl">Background</span><div class="segs" id="bgFillSeg"><button type="button" data-v="basic" title="Fast, in the browser">Built-in</button><button type="button" data-v="ai" title="MI-GAN on the server: fills what appears behind objects">AI (MI-GAN)</button></div></div>
+        <div class="exnote" id="bgFillNote">What appears behind objects when the viewpoint moves.</div>
+      </div>
+      <button class="pbtn" id="measureBtn" type="button">Measure distance <kbd>M</kbd></button>
+      <button class="pbtn" id="depthDl" type="button">Download depth map</button>
+    </div>
+    <div id="exportPanel" class="pop wide" hidden role="dialog" aria-label="Export">
+      <div class="pophead">Export</div>
+      <section class="exsec">
+        <div class="exh">Image <span class="exmeta" id="exSizeOut"></span></div>
+        <div class="segs" id="exSize"><button type="button" data-v="screen">Screen</button><button type="button" data-v="2x">2×</button><button type="button" data-v="4k">4K</button></div>
+        <div class="segs" id="exFmt"><button type="button" data-v="jpg">JPEG</button><button type="button" data-v="png">PNG</button></div>
+        <button class="pbtn pri" id="exImageBtn" type="button">Save image</button>
+      </section>
+      <section class="exsec">
+        <div class="exh">Stereo pair</div>
+        <div class="segs" id="exLayout"><button type="button" data-v="sbs" title="Left eye on the left (VR players, 3D TVs)">Side by side</button><button type="button" data-v="cross" title="Right eye on the left: free-view with crossed eyes">Cross</button><button type="button" data-v="tb" title="Left eye on top">Top/bottom</button><button type="button" data-v="anaglyph" title="Red/cyan glasses (Dubois)">Anaglyph</button></div>
+        <div class="prow"><label for="sStrength">Strength</label><input type="range" id="sStrength" min="0" max="200" value="100"><output id="oStrength">1.00×</output></div>
+        <button class="pbtn" id="exStereoBtn" type="button">Save stereo image</button>
+        <div class="exnote" id="exStereoNote" hidden>Needs a depth map.</div>
+      </section>
+      <section class="exsec" id="exPano">
+        <div class="exh">360° panorama <span class="exmeta" id="exPanoOut"></span></div>
+        <div class="segs" id="exPanoMode"><button type="button" data-v="mono">Mono</button><button type="button" data-v="stereo" title="Omni-directional stereo, left eye on top">Stereo (ODS)</button></div>
+        <div class="segs" id="exPanoW"><button type="button" data-v="4096">4K</button><button type="button" data-v="8192">8K</button></div>
+        <button class="pbtn" id="exPanoBtn" type="button">Render 360° image</button>
+        <div class="exnote">With the 3D objects. Mono files carry Photo Sphere metadata.</div>
+      </section>
+      <section class="exsec">
+        <div class="exh">Video loop</div>
+        <div class="segs" id="exLoops"><button type="button" data-v="1">6.5 s</button><button type="button" data-v="2">13 s</button><button type="button" data-v="3">20 s</button></div>
+        <button class="pbtn" id="exVideoBtn" type="button">Record video</button>
+      </section>
+      <button class="pbtn ghost" id="exDepthBtn" type="button">Download depth map</button>
+    </div>
+    <button id="recStop" type="button" aria-label="Stop recording"><span class="dot"></span>Recording · stop</button>
+    <div id="measureLayer"></div>
+    <div id="measureBar" hidden><span class="mt">Tap a first point on a surface</span><button class="pbtn" id="measureClear" type="button">Clear</button><button class="pbtn pri" id="measureDone" type="button">Done</button></div>
+    <div id="fshint"></div>
+    <div id="probe"></div>
+    <div id="readout">
+      <div class="sliders">
+        <div class="slider"><label for="sMove">Move</label>
+          <input type="range" id="sMove" min="0" max="100" value="55" aria-label="Viewpoint travel"></div>
+        <div class="slider"><label for="sNear" id="lblNear">Scale</label>
+          <input type="range" id="sNear" min="0" max="100" value="85" aria-label="Depth range"></div>
+        <div class="slider" id="rowFocus" hidden><label for="sFocus">Focus</label>
+          <input type="range" id="sFocus" min="0" max="100" value="45" aria-label="Zero-parallax plane"></div>
+        <div class="slider dim" id="rowDist"><label for="sDist">Distance</label>
+          <input type="range" id="sDist" min="0" max="100" value="40" aria-label="Response to face distance in head tracking"></div>
+      </div>
+      <div class="rowfoot">
+        <div class="chips">
+          <button id="rotBtn" class="chip" aria-pressed="false">Rotate</button>
+          <button id="revBtn" class="chip dim" aria-pressed="false">Reverse</button>
+        </div>
+        <div id="info"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside id="editor" hidden aria-label="3D objects editor">
+    <button id="edClose" class="ib" aria-label="Close editor">✕</button>
+    <h3><span data-uk="3D-об'єкти" data-en="3D objects">3D objects</span><span id="edCount"></span></h3>
+    <div class="ebtns">
+      <label class="eb go" style="position:relative;overflow:hidden">
+        <span data-uk="+ Файл моделі" data-en="+ Model file">+ Model file</span>
+        <input type="file" id="modelFile" multiple style="position:absolute;inset:0;opacity:0;cursor:pointer"
+          accept=".glb,.gltf,.bin,.obj,.mtl,.fbx,.ply,.stl,.3mf,.usdz,.las,.xyz,.pcd,.zip,.png,.jpg,.jpeg,.webp,.ktx2,.tga">
+      </label>
+      <button class="eb" id="edLibBtn" hidden data-uk="Бібліотека" data-en="Library">Library</button>
+    </div>
+    <div id="edLib" class="mlist" hidden></div>
+    <div class="small" id="edHint"></div>
+    <div id="olist" class="olist"></div>
+
+    <div id="insp" hidden>
+      <h3><span data-uk="Вибраний об'єкт" data-en="Selected object">Selected object</span><span id="iWarn" class="warnline"></span></h3>
+      <div class="erow"><label data-uk="Назва" data-en="Name">Name</label><input type="text" id="iName"></div>
+      <div class="ebtns" id="iGizmo">
+        <button class="eb on" data-g="translate" data-uk="Рух" data-en="Move">Move</button>
+        <button class="eb" data-g="rotate" data-uk="Поворот" data-en="Rotate">Rotate</button>
+        <button class="eb" data-g="scale" data-uk="Масштаб" data-en="Scale">Scale</button>
+      </div>
+      <div class="erow"><label data-uk="Переміщення" data-en="Placement">Placement</label>
+        <div class="ebtns" id="iPlace" style="margin:0">
+          <button class="eb" data-p="surface" title="Slides over the surface" data-uk="Поверхня" data-en="Surface">Surface</button>
+          <button class="eb" data-p="free" title="Moves freely at its distance" data-uk="Вільно" data-en="Free">Free</button>
+          <button class="eb" data-p="gravity" title="Falls to the ground when released" data-uk="Гравітація" data-en="Gravity">Gravity</button>
+        </div></div>
+      <div class="small" id="iPlaceHint"></div>
+      <div class="erow"><label data-uk="Відстань, м" data-en="Distance, m">Distance, m</label><input type="range" id="iDist" min="0" max="1000" value="300"><input type="number" id="iDistN" step="0.05" min="0.2" style="flex:0 0 66px"></div>
+      <div class="small" id="iSurf"></div>
+      <div class="erow"><label></label><label class="small"><input type="checkbox" id="iKeep"> <span data-uk="зберігати видимий розмір" data-en="keep apparent size">keep apparent size</span></label></div>
+      <div class="ebtns">
+        <button class="eb" id="iToSurf" data-uk="→ на поверхню" data-en="→ to surface">→ to surface</button>
+        <button class="eb" id="iDrop" data-uk="↓ на землю" data-en="↓ to ground">↓ to ground</button>
+        <button class="eb" id="iFace" data-uk="↺ до глядача" data-en="↺ face viewer">↺ face viewer</button>
+        <button class="eb" id="iAlign" data-uk="⟂ за нормаллю" data-en="⟂ to normal">⟂ to normal</button>
+        <button class="eb" id="iUp" title="Z-up ↔ Y-up" data-uk="Z↕Y вісь" data-en="Z↕Y axis">Z↕Y axis</button>
+      </div>
+      <div class="erow"><label data-uk="Висота, м" data-en="Height, m">Height, m</label><input type="number" id="iHeight" step="0.01" min="0.001"></div>
+      <div class="erow"><label data-uk="Поворот, °" data-en="Yaw, °">Yaw, °</label><input type="range" id="iYaw" min="-180" max="180" value="0"><output id="iYawO">0°</output></div>
+      <div class="erow"><label></label><label class="small"><input type="checkbox" id="iSlice"> <span data-uk="показати зріз глибини" data-en="show depth slice">show depth slice</span></label></div>
+
+      <details open><summary data-uk="Вигляд" data-en="Look">Look</summary>
+        <div class="erow"><label data-uk="Стиль" data-en="Style">Style</label><select id="fStyle">
+          <option value="normal" data-uk="Природний" data-en="Natural">Natural</option>
+          <option value="clay" data-uk="Глина" data-en="Clay">Clay</option>
+          <option value="studio" data-uk="Студія" data-en="Studio">Studio</option>
+          <option value="porcelain" data-uk="Порцеляна" data-en="Porcelain">Porcelain</option>
+          <option value="bronze" data-uk="Бронза" data-en="Bronze">Bronze</option>
+          <option value="jade" data-uk="Нефрит" data-en="Jade">Jade</option>
+          <option value="technical" data-uk="Технічний" data-en="Technical">Technical</option>
+          <option value="toon" data-uk="Мультяшний" data-en="Toon">Toon</option>
+          <option value="xray" data-uk="Рентген" data-en="X-ray">X-ray</option>
+          <option value="hologram" data-uk="Голограма" data-en="Hologram">Hologram</option>
+          <option value="wire" data-uk="Каркас" data-en="Wireframe">Wireframe</option>
+          <option value="normals" data-uk="Нормалі" data-en="Normals">Normals</option>
+          <option value="height" data-uk="Висота" data-en="Height">Height</option>
+          <option value="ghost" data-uk="Привид" data-en="Ghost">Ghost</option>
+        </select></div>
+        <div class="erow"><label data-uk="Підказки форми" data-en="Shading cues">Shading cues</label><select id="fEnhance" title="Rim light, sky and ground tint, cavity shading: helps models without textures">
+          <option value="auto" data-uk="Авто (без текстур)" data-en="Auto (untextured)">Auto (untextured)</option>
+          <option value="on" data-uk="Увімкнено" data-en="On">On</option>
+          <option value="off" data-uk="Вимкнено" data-en="Off">Off</option>
+        </select></div>
+        <div class="erow"><label data-uk="Ребра" data-en="Edges">Edges</label><label class="small"><input type="checkbox" id="fEdges"> <span data-uk="лінії гострих ребер" data-en="lines on sharp edges">lines on sharp edges</span></label></div>
+        <div class="erow"><label data-uk="Непрозорість" data-en="Opacity">Opacity</label><input type="range" id="fOpacity" min="0" max="100" value="100"><output id="fOpacityO">100%</output></div>
+        <div class="erow"><label data-uk="Яскравість" data-en="Brightness">Brightness</label><input type="range" id="fBright" min="20" max="250" value="100"><output id="fBrightO">100%</output></div>
+        <div class="erow"><label data-uk="Відтінок" data-en="Tint">Tint</label><input type="color" id="fTint" value="#ffffff"><input type="range" id="fTintA" min="0" max="100" value="0"><output id="fTintAO">0%</output></div>
+        <div class="erow"><label data-uk="Світіння" data-en="Glow">Glow</label><input type="color" id="fGlow" value="#7fd8ff"><input type="range" id="fGlowA" min="0" max="300" value="0"><output id="fGlowAO">0</output></div>
+        <div class="erow"><label data-uk="Контур" data-en="Outline">Outline</label><input type="color" id="fOut" value="#ffd24a"><input type="range" id="fOutW" min="0" max="40" value="0"><output id="fOutWO">0</output></div>
+        <div class="erow" id="rowPoint" hidden><label data-uk="Розмір точок" data-en="Point size">Point size</label><input type="range" id="fPoint" min="1" max="100" value="12"><output id="fPointO">12 mm</output></div>
+      </details>
+      <details><summary data-uk="Тінь і глибина" data-en="Shadow and depth">Shadow and depth</summary>
+        <div class="erow"><label data-uk="Тінь" data-en="Shadow">Shadow</label><select id="fShadow">
+          <option value="none" data-uk="Немає" data-en="None">None</option>
+          <option value="blob" data-uk="М'яка пляма" data-en="Soft blob">Soft blob</option>
+          <option value="real" data-uk="Справжня (від сонця)" data-en="Real (from sun)">Real (from sun)</option>
+        </select></div>
+        <div class="erow"><label data-uk="Сила тіні" data-en="Shadow strength">Shadow strength</label><input type="range" id="fShadowA" min="0" max="100" value="55"><output id="fShadowAO">55%</output></div>
+        <div class="erow"><label data-uk="Перекриття" data-en="Occlusion">Occlusion</label><label class="small"><input type="checkbox" id="fOcclude" checked> <span data-uk="ховати за ближчими частинами панорами" data-en="hide behind nearer parts of the panorama">hide behind nearer parts of the panorama</span></label></div>
+      </details>
+      <details><summary data-uk="Рух і поява" data-en="Motion and entrance">Motion and entrance</summary>
+        <div class="erow"><label data-uk="Обертання" data-en="Spin">Spin</label><input type="range" id="fSpin" min="-90" max="90" value="0"><output id="fSpinO">0°/s</output></div>
+        <div class="erow"><label data-uk="Ширяння" data-en="Float">Float</label><input type="range" id="fBob" min="0" max="50" value="0"><output id="fBobO">0 cm</output></div>
+        <div class="erow" id="rowClip" hidden><label data-uk="Анімація" data-en="Animation">Animation</label><select id="fClip"></select></div>
+        <div class="erow" id="rowClipS" hidden><label data-uk="Швидкість" data-en="Speed">Speed</label><input type="range" id="fClipS" min="0" max="300" value="100"><output id="fClipSO">1.00×</output></div>
+        <div class="erow"><label data-uk="Поява" data-en="Entrance">Entrance</label><select id="fAppear">
+          <option value="none" data-uk="Одразу" data-en="Instant">Instant</option>
+          <option value="fade" data-uk="Проявлення" data-en="Fade in">Fade in</option>
+          <option value="grow" data-uk="Виростання" data-en="Grow">Grow</option>
+          <option value="rise" data-uk="Підйом із землі" data-en="Rise">Rise</option>
+        </select><button class="eb" id="fReplay" title="Replay">▶</button></div>
+      </details>
+      <details><summary data-uk="Підпис" data-en="Label">Label</summary>
+        <div class="erow"><label data-uk="Показувати" data-en="Show">Show</label><select id="fLabel">
+          <option value="off" data-uk="Ні" data-en="No">No</option>
+          <option value="always" data-uk="Завжди" data-en="Always">Always</option>
+          <option value="select" data-uk="Під час вибору / дотику" data-en="On select / tap">On select / tap</option>
+        </select></div>
+        <div class="erow"><label data-uk="Текст" data-en="Text">Text</label><textarea id="fLabelT" placeholder="Quercus robur · 120 yrs"></textarea></div>
+      </details>
+      <div class="ebtns">
+        <button class="eb" id="iDup" data-uk="Дублювати" data-en="Duplicate">Duplicate</button>
+        <button class="eb warn" id="iDel" data-uk="Видалити" data-en="Delete">Delete</button>
+      </div>
+    </div>
+
+    <details id="dScene"><summary data-uk="Світло сцени" data-en="Scene lighting">Scene lighting</summary>
+      <div class="erow"><label data-uk="Світло панорами" data-en="Panorama light">Panorama light</label><input type="range" id="sEnv" min="0" max="300" value="100"><output id="sEnvO">1.00</output></div>
+      <div class="erow"><label data-uk="Сонце, азимут" data-en="Sun azimuth">Sun azimuth</label><input type="range" id="sAz" min="-180" max="180" value="35"><output id="sAzO">35°</output></div>
+      <div class="erow"><label data-uk="Сонце, висота" data-en="Sun elevation">Sun elevation</label><input type="range" id="sEl" min="2" max="89" value="50"><output id="sElO">50°</output></div>
+      <div class="erow"><label data-uk="Сонце, сила" data-en="Sun strength">Sun strength</label><input type="range" id="sSun" min="0" max="600" value="160"><output id="sSunO">1.60</output></div>
+      <div class="erow"><label data-uk="Експозиція" data-en="Exposure">Exposure</label><input type="range" id="sExp" min="20" max="300" value="100"><output id="sExpO">1.00</output></div>
+      <div class="erow"><label data-uk="Серпанок" data-en="Haze">Haze</label><input type="range" id="sHaze" min="0" max="100" value="0"><output id="sHazeO">0</output></div>
+      <div class="ebtns"><button class="eb" id="sAuto" data-uk="☀ Сонце з панорами" data-en="☀ Sun from panorama">☀ Sun from panorama</button></div>
+    </details>
+    <details id="dSave"><summary data-uk="Збереження сцени" data-en="Saving the scene">Saving the scene</summary>
+      <div class="small" id="saveState"></div>
+      <div class="ebtns">
+        <button class="eb" id="scJson" data-uk="⇩ .scene.json" data-en="⇩ .scene.json">⇩ .scene.json</button>
+        <button class="eb" id="scZip" data-uk="⇩ Пакет .zip" data-en="⇩ Package .zip">⇩ Package .zip</button>
+        <label class="eb" style="position:relative;overflow:hidden"><span data-uk="⇧ Імпорт" data-en="⇧ Import">⇧ Import</span>
+          <input type="file" id="scImport" accept=".json,.zip" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
+        <button class="eb" id="scRevert" data-uk="↺ Версія з сервера" data-en="↺ Server version">↺ Server version</button>
+        <button class="eb warn" id="scClear" data-uk="Очистити все" data-en="Clear all">Clear all</button>
+      </div>
+    </details>
+    <details id="dPano"><summary data-uk="Панорама і глибина" data-en="Panorama and depth">Panorama and depth</summary>
+      <div class="erow"><label data-uk="Карта глибини" data-en="Depth map">Depth map</label><label class="small"><input type="checkbox" id="pInvert"> <span data-uk="інвертувати (біле = далеко)" data-en="invert (white = far)">invert (white = far)</span></label></div>
+      <div class="erow"><label data-uk="Стерео" data-en="Stereo">Stereo</label><label class="small"><input type="checkbox" id="pSwap"> <span data-uk="поміняти очі місцями" data-en="swap eyes">swap eyes</span></label></div>
+      <div class="ebtns">
+        <button class="eb" id="pDepthPng" data-uk="⇩ Карта глибини .png" data-en="⇩ Depth map .png">⇩ Depth map .png</button>
+        <button class="eb" id="pContours" data-uk="Ізолінії" data-en="Contours">Contours</button>
+      </div>
+      <div class="small" id="pInfo"></div>
+    </details>
+  </aside>
+
+  <div id="drop" data-uk="Відпустіть файли моделі" data-en="Drop model files">Drop model files</div>
+  <div id="busy"><div><div id="busyTitle">Reconstructing depth</div><div id="busyStep">—</div></div></div>
+  <video id="cam" playsinline muted autoplay
+         style="position:absolute;width:2px;height:2px;opacity:0;pointer-events:none;left:-10px"></video>
+</div>
+
+<dialog id="palette" aria-label="Command palette">
+  <div class="palin"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+    <input id="palInput" placeholder="Type a command or an image name…" autocomplete="off" spellcheck="false" aria-label="Command"></div>
+  <div id="palList" role="listbox"></div>
+  <div class="palfoot"><span><kbd>↑</kbd><kbd>↓</kbd>move</span><span><kbd>↵</kbd>run</span><span><kbd>esc</kbd>close</span></div>
+</dialog>
+
+<dialog id="shareDlg" aria-label="View in a VR headset">
+  <div class="dlghead"><span>View in a VR headset</span><button id="shareClose" class="ib sm" type="button" aria-label="Close">✕</button></div>
+  <p class="dlgsub">Open the link on the headset (Meta Quest Browser or any WebXR browser), or scan the code with the headset or a phone. It opens this image with your 3D objects and the settings below.</p>
+  <div class="dlggrid">
+    <div class="dlgopts">
+      <div class="optrow" id="shareVM"><span class="optl">View</span><div class="segs" id="shareVMSeg"><button type="button" data-v="6dof" title="Walk inside the depth mesh">6DoF</button><button type="button" data-v="stereo" title="Original stereo panorama, head rotation only">Stereo</button><button type="button" data-v="flat" title="Flat sphere">Flat</button></div></div>
+      <div class="optrow"><span class="optl">Quality</span><div class="segs" id="shareVQ"><button type="button" data-v="std">Standard</button><button type="button" data-v="sharp">Sharp</button><button type="button" data-v="max">Max</button></div></div>
+      <div class="prow"><label for="shareVS">Scale</label><input type="range" id="shareVS" min="0" max="200" value="100"><output id="oShareVS">1.00×</output></div>
+      <label class="chk"><input type="checkbox" id="shareObj"> Show 3D objects</label>
+      <label class="chk"><input type="checkbox" id="shareAuto"> Offer “Enter VR” as soon as it opens</label>
+      <button class="pbtn" id="shareMake" type="button">Update link</button>
+      <button class="pbtn pri" id="shareHere" type="button" hidden>Enter VR on this device</button>
+    </div>
+    <div class="dlgqr">
+      <div id="shareOut" hidden>
+        <canvas id="shareQR" width="232" height="232" aria-label="QR code of the link"></canvas>
+        <div class="linkrow"><input id="shareLink" readonly aria-label="Link"><button class="pbtn" id="shareCopy" type="button">Copy</button><button class="pbtn" id="shareOpen" type="button">Open</button></div>
+      </div>
+      <div id="shareStatus" class="exnote"></div>
+    </div>
+  </div>
+</dialog>
+
+<div id="help" role="dialog" aria-modal="true" aria-label="Help">
+  <div class="wrap2">
+    <div class="bar"><span class="t">nomono3d help</span>
+      <span class="chips" style="pointer-events:auto">
+        <button class="chip" id="helpEn">EN</button><button class="chip" id="helpUk">UA</button>
+        <button class="chip" id="helpClose">Close</button>
+      </span></div>
+    <div id="helpBody"><p class="libmsg">…</p></div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

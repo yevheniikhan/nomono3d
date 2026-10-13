@@ -1,0 +1,19 @@
+{
+ "generated": "tools/build-manifest.py",
+ "items": [
+  {
+   "src": "Demo/atrium.jpg",
+   "title": "Atrium",
+   "description": "A rendered interior with an exact depth map. A demo object stands on the floor; open the 3D objects editor to add your own.",
+   "order": 1,
+   "kind": "pano",
+   "w": 4096,
+   "h": 2048,
+   "size": 1055484,
+   "album": "Demo",
+   "depth": "Demo/atrium_depth.png",
+   "thumb": "thumbs/Demo/atrium.jpg",
+   "scene": "Demo/atrium.scene.json"
+  }
+ ]
+}

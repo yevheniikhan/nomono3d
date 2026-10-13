@@ -1,0 +1,7 @@
+# Third-party libraries (three.js and its decoders): versions are pinned, so cache them for long.
+# If your host reports error 500 because of this file, simply delete it.
+<IfModule mod_headers.c>
+  <FilesMatch ".">
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+</IfModule>

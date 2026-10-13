@@ -1,0 +1,20 @@
+{
+ "format": "nomono3d-scene",
+ "version": 1,
+ "panorama": "panoramas/Demo/atrium.jpg",
+ "near": 1.456237,
+ "light": { "env": 1, "az": -60, "el": 40, "sun": 1.2, "exp": 1, "haze": 0 },
+ "objects": [
+  {
+   "id": "demo-sculpture-1",
+   "name": "Sculpture",
+   "src": "models/sculpture.glb",
+   "up": "y",
+   "unitK": 1,
+   "position": [-1.0996, -1.9548, -2.9322],
+   "quaternion": [0, 0.2588, 0, 0.9659],
+   "scale": 1.25,
+   "fx": { "shadow": "blob", "shadowA": 0.45, "label": "select", "labelText": "Sculpture\nGLB model placed on the floor" }
+  }
+ ]
+}

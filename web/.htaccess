@@ -1,0 +1,35 @@
+# nomono3d: optional Apache settings (most shared hosting).
+# If your host reports error 500 because of this file, simply delete it.
+
+# Correct MIME types for 3D formats and WebAssembly
+<IfModule mod_mime.c>
+  AddType model/gltf-binary .glb
+  AddType model/gltf+json .gltf
+  AddType application/wasm .wasm
+  AddType image/ktx2 .ktx2
+  AddType application/manifest+json .webmanifest
+  AddType text/javascript .js .mjs
+  AddType image/avif .avif
+  AddType image/webp .webp
+</IfModule>
+
+# Compress text (js, json, html, gltf)
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json model/gltf+json application/manifest+json image/svg+xml
+</IfModule>
+
+# Caching: code, lists and scenes are revalidated on every load (a 304 is cheap), so after
+# an update everyone sees the new version at once. Images and models are cached for an hour.
+# lib/ has its own .htaccess (cached for a week).
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|js|mjs|json|php|webmanifest)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "\.(glb|gltf|bin|ktx2|png|jpe?g|webp|avif|obj|mtl|fbx|ply|stl|3mf|usdz|las|xyz|pcd|zip)$">
+    Header set Cache-Control "public, max-age=3600"
+  </FilesMatch>
+</IfModule>
+
+# Without PHP the library can read the server's automatic folder listing of panoramas/,
+# photos/ and models/. Uncomment the line below (or run tools/build-manifest.py instead).
+# Options +Indexes

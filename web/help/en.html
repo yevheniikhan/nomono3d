@@ -1,0 +1,305 @@
+<h2 id="top" style="margin-top:12px">Help</h2>
+<p><b>nomono3d</b> rebuilds a flat image as real 3D geometry from a depth map. A 360° panorama becomes a space you can look around and shift your viewpoint in, with digitised 3D objects standing on its real depth. An ordinary photo becomes a “window” with parallax: near things move against far ones as you tilt the phone, move the mouse or your head.</p>
+<div class="toc">
+  <a href="#start">Quick start</a><a href="#ai">AI depth</a><a href="#formats">Formats</a><a href="#view">Viewing</a><a href="#photos">Photo mode</a>
+  <a href="#depthviews">Depth views</a><a href="#measure">Measuring</a><a href="#library">Library</a><a href="#objects">3D objects</a><a href="#export">Export</a>
+  <a href="#vr">VR headset</a><a href="#keys">Keyboard</a><a href="#tips">Tips</a><a href="#trouble">Troubleshooting</a><a href="#files">Site files</a>
+</div>
+
+<h2 id="start">Quick start</h2>
+<ol>
+  <li>Choose <b>360° panorama</b> or <b>Photo</b> at the top of the start screen. A picture that is not 2:1, 1:1 or 4:1 switches to Photo by itself.</li>
+  <li>Pick an item in the <b>Library</b>, or load your own image into the first slot (tap, drag and drop, or paste from the clipboard).</li>
+  <li>Add a <b>depth map</b> in the second slot, or leave it empty: when an AI engine is available (see below) the map is generated for you. <b>Generate</b> creates it right away so you can check or download it (<b>Download</b>).</li>
+  <li>Press <b>View in 3D</b>.</li>
+</ol>
+<p class="note2">The gyroscope and the camera work only over a secure connection: <code>https://</code> or <code>http://localhost</code>. Opening the file by double-click (<code>file://</code>) will not work: a web server is required.</p>
+
+<h2 id="ai">AI depth maps</h2>
+<p>The top-left corner of the start screen shows which engine is available:</p>
+<table>
+  <tr><th>Engine</th><th>Panoramas</th><th>Photos</th></tr>
+  <tr><td><b>GPU server</b> (the site is served by the nomono3d server, e.g. from Google Colab)</td><td>DA360, a network trained for 360° images: up to 4096×2048</td><td>Depth Anything V2: up to 2048 px</td></tr>
+  <tr><td><b>In the browser</b> (any static hosting)</td><td>—</td><td>Depth Anything V2 Small on WebGPU or WASM. The first run downloads a ~50 MB model</td></tr>
+</table>
+<ul>
+  <li>When an image from the server library gets an AI depth map, the map is saved next to it (<code>name_depth.png</code>), so it opens instantly next time.</li>
+  <li><b>Save to library</b> (next to the image size) saves your own image and its depth map into the server library.</li>
+  <li>Generated maps are relative: they know what is nearer and what is farther, not metres. For panoramas the app fits the scale to the ground automatically; for photos you set the depth by eye with the <b>Depth</b> slider.</li>
+</ul>
+<p>To run the GPU server for free, open <code>colab/nomono3d_colab.ipynb</code> from the project repository in Google Colab: it prints a public link and a QR code for your phone.</p>
+
+<h2 id="formats">Formats</h2>
+<h3>Panoramas</h3>
+<table>
+  <tr><th>Ratio</th><th>Format</th><th>What you get</th></tr>
+  <tr><td>2:1</td><td>mono equirectangular (e.g. 8192×4096)</td><td>with a depth map: parallax and 3D objects; without one, turning only</td></tr>
+  <tr><td>1:1</td><td>top-bottom stereo, left eye on top</td><td>depth from the stereo pair, or from a depth map</td></tr>
+  <tr><td>4:1</td><td>side-by-side stereo, left eye on the left</td><td>as 1:1</td></tr>
+</table>
+<p>JPEG, PNG, WebP or AVIF. Larger images are scaled down to the GPU limit automatically (4096 on low-end phones). If the eyes of a stereo panorama are swapped, tick <b>swap eyes</b> (editor → “Panorama and depth”) or set <code>"swapEyes": true</code> in <a href="#manifest">manifest.json</a>.</p>
+<h3>Photos</h3>
+<p>Any ratio, landscape or portrait, JPEG, PNG, WebP or AVIF. EXIF rotation is applied by the browser.</p>
+<h3>Depth map</h3>
+<ul>
+  <li>A greyscale image of the same framing: 2:1 for a panorama (one eye; a 1:1 map of a stereo panorama also works), the photo's own ratio for a photo.</li>
+  <li><b>White = near, black = far</b> (inverse depth, as neural networks produce it). If yours is the other way round, tick <b>invert</b> in the editor or set <code>"depthInvert": true</code>.</li>
+  <li>PNG is better than JPEG. 8-bit “terracing” is smoothed automatically while object edges stay sharp; blurred edges (typical for neural maps) are sharpened using the photo's colours.</li>
+  <li>Naming: the image name plus <code>_depth</code> (also <code>-depth</code>, <code>.depth</code>, <code>_disp</code>): <code>forest.jpg</code> + <code>forest_depth.png</code>.</li>
+  <li>For a stereo panorama without a map, open it once and save the estimated map: editor → “Panorama and depth” → <b>⇩ Depth map .png</b>.</li>
+</ul>
+<p><b>How parallax is built.</b> The image is rendered as two layers. The front layer holds objects with exact outlines: they shift according to their own depth and are not stretched towards the background. The back layer is the background continued behind them, mirrored from the visible edge: it shows in the gaps that open when the viewpoint moves.</p>
+
+<h2 id="view">Viewing</h2>
+<table>
+  <tr><th>Control</th><th>What it does</th></tr>
+  <tr><td><b>Live</b> (panoramas)</td><td>turning the phone turns the view; dragging moves the viewpoint (parallax)</td></tr>
+  <tr><td><b>Lock</b> (panoramas)</td><td>drag to look around; tilting the phone gives parallax. Always this way on desktop</td></tr>
+  <tr><td>two fingers / mouse wheel</td><td>field of view (zoom)</td></tr>
+  <tr><td>double tap</td><td>reset the view</td></tr>
+  <tr><td><b>Head</b></td><td>head tracking with the front camera: the screen becomes a window into the scene</td></tr>
+  <tr><td><b>Depth</b> (top right)</td><td>depth views over the image: grey, colour, contours, slice, normals, fog (see <a href="#depthviews">Depth views</a>)</td></tr>
+  <tr><td><b>Objects</b> / <b>Export</b> / <b>Headset</b></td><td>3D objects editor; images, stereo, 360° and video; a link and QR code for a VR headset</td></tr>
+  <tr><td><b>Move</b></td><td>how far the viewpoint travels</td></tr>
+  <tr><td><b>Scale</b> / <b>Depth</b></td><td>panoramas: depth scale (lower = deeper); photos: how deep the scene is</td></tr>
+  <tr><td><b>Distance</b></td><td>response to face distance in Head mode (40 is physically correct)</td></tr>
+  <tr><td><b>Rotate</b> / <b>Orbit</b></td><td>auto-rotation of a panorama / automatic orbit of the viewpoint in a photo</td></tr>
+  <tr><td><b>Reverse</b></td><td>reversed zoom direction in Head mode</td></tr>
+  <tr><td>← →</td><td>previous / next library item (keyboard)</td></tr>
+  <tr><td>⌘K / Ctrl+K</td><td>command palette: every action and every library item by name</td></tr>
+</table>
+
+<h2 id="depthviews">Depth views</h2>
+<p>The <b>Depth</b> button opens a small panel of overlays that show how the image was rebuilt. They help to judge a depth map and to place objects. <b>Opacity</b> blends each view with the photograph.</p>
+<table>
+  <tr><th>View</th><th>What it shows</th></tr>
+  <tr><td>Depth (0–1)</td><td>the depth map in grey, white is near</td></tr>
+  <tr><td>Colour (2)</td><td>a colour scale from red (near) to blue (far)</td></tr>
+  <tr><td>Contours (3)</td><td>lines of equal distance; in panoramas every metre, thicker every 5 m and 25 m</td></tr>
+  <tr><td>Slice (4)</td><td>one distance band lit, the rest dimmed; <b>Distance</b> moves the band</td></tr>
+  <tr><td>Normals (5)</td><td>the orientation of the rebuilt surfaces: floors, walls and slopes in different colours</td></tr>
+  <tr><td>Fog (6)</td><td>aerial haze that grows with distance; <b>Fog distance</b> sets where it starts</td></tr>
+</table>
+<p>The numbers are keyboard shortcuts. <b>Download depth map</b> saves the map as an 8-bit PNG.</p>
+<p><b>Background</b> (photos, on a nomono3d server such as the Colab notebook): what appears behind objects when the viewpoint moves. <b>AI (MI-GAN)</b> lets a neural network paint it (best in foliage, grass and other textures); <b>Built-in</b> mirrors the nearby background in the browser and needs no server. Switching rebuilds the photo; your 3D objects stay.</p>
+
+<h2 id="measure">Measuring</h2>
+<p><b>Depth ▸ Measure distance</b> (or <kbd>M</kbd>): tap two points on any surface. The label shows the straight distance and, in panoramas, the height difference (↕). Tap again for another measurement; <b>Clear</b> removes them all, <b>Done</b> or Esc stops measuring.</p>
+<p class="note2">Panoramas are in metres from the calibrated scale (the camera height, about 1.6 m, or a fit of the floor). Photos have no absolute scale: their distances are relative to the nearest surface (1.00 × = the nearest point).</p>
+
+<h2 id="photos">Photo mode</h2>
+<p>The photo is the window and the scene sits behind it. The frame stays still on screen, near objects drift against your movement and far ones with it.</p>
+<table>
+  <tr><th>Control</th><th>What it does</th></tr>
+  <tr><td>drag / tilt the phone / <b>Head</b></td><td>move the viewpoint</td></tr>
+  <tr><td><b>Orbit</b></td><td>a smooth automatic sweep, the classic “3D photo” motion; a touch pauses it</td></tr>
+  <tr><td><b>Depth</b></td><td>how deep the scene is (the ratio of the farthest to the nearest distance)</td></tr>
+  <tr><td><b>Focus</b></td><td>the plane that stays still: low values pin the background, high values pin the foreground</td></tr>
+  <tr><td><b>Fit</b> / <b>Fill</b></td><td>show the whole photo, or fill the screen (edges are cropped just enough to hide them while moving)</td></tr>
+</table>
+<p>3D objects are placed in panoramas only.</p>
+
+<h2 id="library">Library</h2>
+<h3>Where files go</h3>
+<pre>site/                         ← site root (public_html, www, htdocs)
+  index.html  js/  lib/  help/  list.php ...
+  panoramas/
+    forest-spring.jpg
+    forest-spring_depth.png    ← depth map
+    forest-spring.scene.json   ← 3D objects (from the editor)
+    Carpathians-2026/          ← subfolder = album (up to two levels)
+      meadow.jpg
+    manifest.json              ← optional: titles, descriptions, order
+  photos/
+    oak.jpg
+    oak_depth.png
+  models/
+    oak.glb
+    oak.jpg                    ← optional model thumbnail
+</pre>
+<p>After uploading files, refresh the page: new items appear in the gallery, with <b>Panoramas / Photos</b> filters and albums.</p>
+
+<h3>How the site finds files</h3>
+<ol>
+  <li><b>nomono3d server</b> (<code>api/list</code>): the library folder of the server, e.g. Google Drive in Colab.</li>
+  <li><b>PHP (list.php)</b>: most ordinary hosting plans. Nothing to configure. Thumbnails are cached in <code>.thumbs/</code> (needs GD or Imagick).</li>
+  <li><b>manifest.json</b>: hosting without PHP (GitHub Pages, Netlify, Cloudflare Pages). After adding files run <code>python tools/build-manifest.py</code> (thumbnails need <code>pip install pillow</code>) and upload the updated <code>manifest.json</code> files and <code>thumbs/</code> folders.</li>
+  <li><b>The server's folder listing</b> (Apache/nginx autoindex, <code>python -m http.server</code>).</li>
+  <li><b>GitHub Pages</b>: if nothing else is available, the list is read from the repository through the GitHub API.</li>
+</ol>
+
+<h3 id="manifest">manifest.json</h3>
+<p>An optional file in <code>panoramas/</code> or <code>photos/</code>. With PHP or the server it only refines titles and settings; on static hosting it is the full list. Paths are relative to its folder.</p>
+<pre>{
+  "title": "Forests of Ukraine",
+  "items": [
+    { "src": "forest-spring.jpg",
+      "title": "Oak forest in spring",
+      "description": "Test plot, 2026",
+      "order": 1,
+      "yaw": 90,
+      "depthInvert": false },
+    { "src": "Carpathians-2026/meadow.jpg", "layout": "tb", "swapEyes": true },
+    { "src": "old.jpg", "hidden": true }
+  ]
+}</pre>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td>title, description</td><td>title and tooltip in the gallery</td></tr>
+  <tr><td>order</td><td>sort order (lower first)</td></tr>
+  <tr><td>yaw</td><td>initial viewing direction of a panorama, degrees</td></tr>
+  <tr><td>layout</td><td><code>mono</code>, <code>tb</code> or <code>sbs</code> for unusual ratios</td></tr>
+  <tr><td>swapEyes, depthInvert</td><td>swap eyes / invert the depth map</td></tr>
+  <tr><td>depth, scene, thumb</td><td>explicit paths when file names do not follow the convention</td></tr>
+  <tr><td>hidden</td><td>hide from the gallery</td></tr>
+</table>
+
+<h3>Links</h3>
+<ul>
+  <li><code>index.html?p=forest-spring</code>: open an item straight away (by file name).</li>
+  <li><code>?mode=photo</code>: start in Photo mode.</li>
+  <li><code>?kiosk</code>: exhibition mode, editing disabled.</li>
+  <li><code>?lib=other-folder</code>: use another folder (with <code>&amp;mode=photo</code> for photos).</li>
+</ul>
+
+<h3>Deploying to your hosting</h3>
+<ol>
+  <li>Copy the content of the <code>web/</code> folder into the site root via FTP or the hosting panel, keeping the folder structure.</li>
+  <li>Enable HTTPS (a free Let's Encrypt certificate is in almost every hosting panel).</li>
+  <li>Put panoramas into <code>panoramas/</code>, photos into <code>photos/</code>, models into <code>models/</code>, then open the site.</li>
+  <li>If the hosting shows error 500, delete <code>.htaccess</code> (it is optional).</li>
+</ol>
+<p>The demos in <code>panoramas/Demo/</code> and <code>photos/Demo/</code> are synthetic test scenes with exact geometry. Delete them together with <code>models/demo-tree.glb</code> when you no longer need them.</p>
+
+<h2 id="objects">3D objects (panoramas and photos)</h2>
+<h3>Model formats</h3>
+<ul>
+  <li><b>GLB / GLTF</b> (recommended): PBR materials, animations, Draco compression, KTX2 and WebP textures.</li>
+  <li><b>OBJ + MTL</b> with textures: select all files together or zip them.</li>
+  <li><b>FBX</b> (with animations), <b>USDZ</b>, <b>3MF</b>, <b>STL</b> (millimetres are converted to metres).</li>
+  <li><b>PLY</b> (mesh or point cloud), <b>LAS</b> (uncompressed point clouds; convert LAZ to LAS first), <b>XYZ</b>, <b>PCD</b>.</li>
+  <li><b>ZIP</b> with any of these plus textures.</li>
+</ul>
+<p class="warn2">Gaussian splats (.splat, .spz, splat PLY) are not supported yet: export a mesh (GLB, OBJ) or a point cloud from your scanning app.</p>
+
+<h3>Adding</h3>
+<ul>
+  <li>Cube button → <b>+ Model file</b>, or drop files onto the panorama (desktop), or <b>Library</b> (models from <code>models/</code>).</li>
+  <li>The object lands on the surface at the centre of the view. If that is a wall or a trunk, it stands on the ground in front of it.</li>
+  <li>Photos work the same way, but their space is relative (the nearest surface is at distance 1), so sizes are set by eye.</li>
+  <li>Size is real when the model is in metres; millimetres and centimetres are detected automatically. Set the exact height in <b>Height, m</b>.</li>
+</ul>
+
+<h3>Placement and depth</h3>
+<table>
+  <tr><th>Action</th><th>How</th></tr>
+  <tr><td>Select</td><td>tap or click the object (green frame); Esc deselects</td></tr>
+  <tr><td>Placement</td><td><b>Surface</b>: dragging slides the object over the rebuilt surface. <b>Free</b>: it moves in the plane facing you, at its distance, and stays where you release it. <b>Gravity</b>: like Free, but on release it falls to the floor and settles with a small bounce</td></tr>
+  <tr><td>Gizmo</td><td><b>Move</b> / <b>Rotate</b> / <b>Scale</b> (W / E / R); <b>On surface</b> hides the gizmo</td></tr>
+  <tr><td>Distance, m</td><td>moves the object along the line of sight: same place on screen, deeper or closer. <b>keep apparent size</b> compensates the scale</td></tr>
+  <tr><td>Panorama surface</td><td>shown under the slider for that direction; if the object is behind it, “hidden” appears</td></tr>
+  <tr><td>Depth slice</td><td>a blue band on the panorama where the scene is at the object's distance: you see at once which trees are in front and which behind</td></tr>
+  <tr><td>Probe</td><td>on desktop the cursor shows the distance to the surface beneath it (↦ 7.3 m)</td></tr>
+  <tr><td>Buttons</td><td><b>→ to surface</b>, <b>↓ to ground</b> (G; with Gravity it drops), <b>↺ face viewer</b>, <b>⟂ to normal</b> (a sign on a wall, a slope), <b>Z↕Y axis</b> (CAD and scanner models lying on their side)</td></tr>
+  <tr><td>Occlusion</td><td>the object hides behind nearer parts of the panorama (e.g. a tree in front). Turn it off for markers that must always be visible</td></tr>
+  <tr><td>Duplicate / Delete</td><td>Ctrl+D / Delete</td></tr>
+</table>
+
+<h3>Effects</h3>
+<table>
+  <tr><th>Group</th><th>Options</th></tr>
+  <tr><td>Style</td><td><b>Natural</b> (the model's own materials), studio looks for scans and CAD models without textures (<b>Clay</b>, <b>Studio</b>, <b>Porcelain</b>, <b>Bronze</b>, <b>Jade</b>), <b>Technical</b> (flat grey with edge lines), <b>Toon</b>, <b>X-ray</b> (visible through the panorama), <b>Hologram</b>, <b>Wireframe</b>, <b>Normals</b>, <b>Height</b> (a colour ramp from bottom to top), <b>Ghost</b></td></tr>
+  <tr><td>Shading cues</td><td>for untextured models: a rim light, sky and ground tint and darker cavities, so the shape reads well against a busy image. <b>Auto</b> turns them on only for models without textures. <b>Edges</b> draws lines on sharp edges</td></tr>
+  <tr><td>Look</td><td>opacity, brightness, tint, glow, outline (colour and width), point size for clouds</td></tr>
+  <tr><td>Shadow</td><td>soft blob or a real shadow from the sun; shadow strength</td></tr>
+  <tr><td>Motion</td><td>spin, float, built-in GLB/FBX animations with speed</td></tr>
+  <tr><td>Entrance</td><td>fade in, grow, rise from the ground; ▶ replays</td></tr>
+  <tr><td>Label</td><td>text above the object: always, or after a tap (species, age, description)</td></tr>
+</table>
+<p><b>Scene lighting.</b> Objects are lit by the panorama itself (light from the sky and surroundings). <b>☀ Sun from panorama</b> finds the brightest point of the sky and points the sun there for shadows. There are also exposure and haze (distant objects blend into the air).</p>
+
+<h3>Saving and publishing</h3>
+<ul>
+  <li>A <b>draft</b> is saved automatically in this browser for each panorama, together with the model files.</li>
+  <li>To make the scene visible to everyone: <b>⇩ Package .zip</b>, then unzip it into the site root. The archive already has the right paths: <code>panoramas/…/name.scene.json</code> and <code>models/…</code>.</li>
+  <li><b>⇩ .scene.json</b>: the scene description only (the models must already be in <code>models/</code>).</li>
+  <li><b>⇧ Import</b>: a .scene.json file or a .zip package. <b>↺ Server version</b>: discard local changes.</li>
+</ul>
+
+<h3>Preparing models</h3>
+<p>For phones keep the total complexity under 1–2 million triangles and textures at 4K or less. Export photogrammetry (Polycam, RealityScan, Metashape, Meshroom) as GLB or OBJ in metres. One command shrinks and compresses a model (needs Node.js):</p>
+<pre>npx @gltf-transform/cli optimize model.glb model-web.glb --compress draco --texture-compress webp --texture-size 4096</pre>
+
+<h2 id="export">Export</h2>
+<p>The <b>Export</b> button (or <kbd>E</kbd>) saves what you see, 3D objects included. Editor helpers (the gizmo and the selection frame) are left out.</p>
+<table>
+  <tr><th>Export</th><th>Details</th></tr>
+  <tr><td>Image</td><td>the current view at screen size, 2× or 4K, as JPEG or PNG</td></tr>
+  <tr><td>Stereo pair</td><td><b>Side by side</b> (left eye on the left, for VR players and 3D TVs), <b>Cross</b> (right eye on the left, for free viewing with crossed eyes), <b>Top/bottom</b>, or a red/cyan <b>Anaglyph</b> (Dubois colours). <b>Strength</b> scales the eye distance. Panoramas converge on the surface in the middle of the view, photos on their focus plane</td></tr>
+  <tr><td>360° panorama</td><td>panoramas only: an equirectangular image from the centre with the objects in it, 4K or 8K. <b>Stereo (ODS)</b> renders omni-directional stereo, left eye on top, for VR photo viewers; it takes longer. Mono files carry Photo Sphere metadata, so Google Photos, Facebook and most 360° viewers recognise them</td></tr>
+  <tr><td>Video loop</td><td>6.5, 13 or 20 s of a seamless camera sweep (photos: the orbit), recorded from the canvas as MP4 or WebM, whichever the browser supports</td></tr>
+  <tr><td>Depth map</td><td>the depth map as an 8-bit PNG, white is near</td></tr>
+</table>
+
+<h2 id="vr">VR headset</h2>
+<p><b>Headset</b> (or <kbd>V</kbd>) makes a link and a QR code that open the current image on a headset, with your 3D objects and these settings: the view (<b>6DoF</b>: walk inside the depth mesh; <b>Stereo</b>: the original stereo pair, head rotation only; <b>Flat</b>: a sphere), quality, scale and whether objects are shown. Open the link in the Meta Quest Browser (or any WebXR browser) and press <b>Enter VR</b>.</p>
+<ul>
+  <li>On a nomono3d server (the Colab notebook, for example) a local image, models added from disk and the scene are saved to the library first, so the headset gets exactly what you set up.</li>
+  <li>On a static site the link opens a library item with its published scene; objects that exist only in your browser are not included (export the scene package and add it to the library).</li>
+  <li>With the Colab notebook the links are Colab links: they open on any device signed in to the same Google account. In the Quest Browser sign in to google.com once. A public link (Cloudflare and others) is optional, for devices without your account. <code>localhost</code> addresses do not work on a headset.</li>
+  <li>On a device that can enter VR itself, <b>Enter VR on this device</b> starts at once.</li>
+</ul>
+<p>Inside VR one compact menu (Y or B on the controllers, or the ☰ on the left wrist with hand tracking) switches the view mode, scale, quality, objects and items. Controllers and hands point and grab objects.</p>
+
+<h2 id="keys">Keyboard and command palette</h2>
+<p><kbd>⌘K</kbd> (Mac) or <kbd>Ctrl</kbd>+<kbd>K</kbd> opens the command palette: type a few letters of an action or an image name and press Enter.</p>
+<table>
+  <tr><th>Key</th><th>Action</th></tr>
+  <tr><td><kbd>O</kbd></td><td>3D objects editor</td></tr>
+  <tr><td><kbd>E</kbd></td><td>export panel</td></tr>
+  <tr><td><kbd>V</kbd></td><td>VR headset link and QR code</td></tr>
+  <tr><td><kbd>M</kbd></td><td>measure distance</td></tr>
+  <tr><td><kbd>0</kbd>–<kbd>6</kbd></td><td>depth views</td></tr>
+  <tr><td><kbd>A</kbd></td><td>auto-rotate (panoramas) / orbit (photos)</td></tr>
+  <tr><td><kbd>F</kbd></td><td>full screen</td></tr>
+  <tr><td><kbd>?</kbd></td><td>help</td></tr>
+  <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>previous / next library item</td></tr>
+  <tr><td><kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> <kbd>G</kbd>, <kbd>Delete</kbd>, <kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>with an object selected in the editor: move, rotate, scale, drop to the ground, delete, duplicate</td></tr>
+</table>
+
+<h2 id="tips">Tips for the best result</h2>
+<ul>
+  <li>Shoot panoramas from a tripod at eye height: the automatic ground scale is then most accurate.</li>
+  <li>Parallax is only as good as the depth map's edges. Feel free to retouch a map in an image editor: whiter = nearer.</li>
+  <li>Photos with a clear foreground (a trunk, a person, a fence) and some distance behind it give the strongest effect. Keep <b>Move</b> moderate: large moves reveal more invented background.</li>
+  <li>Put objects on the ground (↓ to ground), turn on a shadow and “☀ Sun from panorama”: that is how they blend in best.</li>
+  <li>For an exhibition: <code>?kiosk</code> in the address, a full-screen browser, images up to 8K.</li>
+</ul>
+
+<h2 id="trouble">Troubleshooting</h2>
+<table>
+  <tr><th>Problem</th><th>Fix</th></tr>
+  <tr><td>No “Generate” button</td><td>no engine: open the site through the nomono3d server (Colab), or use Photo mode in a browser with WebGPU or WebAssembly</td></tr>
+  <tr><td>AI depth is slow</td><td>the first run downloads the model; on the server, the first request also loads it onto the GPU (cell 4 of the notebook shows progress)</td></tr>
+  <tr><td>Black screen, “Out of GPU memory”</td><td>the image is too large: scale it to 8192 pixels wide, close other tabs</td></tr>
+  <tr><td>Empty library</td><td>check the <code>panoramas/</code> and <code>photos/</code> folders and file extensions; without PHP run <code>tools/build-manifest.py</code>; the library does not work over <code>file://</code></td></tr>
+  <tr><td>The object scene did not open</td><td>the <code>.scene.json</code> must sit next to the panorama with the same name and the models must be in <code>models/</code>; details in the browser console (F12)</td></tr>
+  <tr><td>Model invisible</td><td>it is behind the panorama surface (“hidden”), too large or too small: <b>→ to surface</b>, the <b>Height</b> field</td></tr>
+  <tr><td>Model lies on its side</td><td><b>Z↕Y axis</b></td></tr>
+  <tr><td>Near looks far</td><td>the depth map is inverted: <b>invert</b></td></tr>
+  <tr><td>No gyroscope on iPhone</td><td>allow motion access in the prompt; https is required</td></tr>
+</table>
+
+<h2 id="files">Site files</h2>
+<table>
+  <tr><th>File / folder</th><th>Purpose</th></tr>
+  <tr><td><code>index.html</code></td><td>the app page</td></tr>
+  <tr><td><code>js/</code></td><td><code>viewer.js</code> (viewing, input), <code>depth.js</code> and <code>layers.js</code> (panorama depth and parallax layers), <code>photo.js</code> (photo parallax), <code>ai.js</code> (AI depth), <code>objects.js</code> and <code>editor.js</code> (3D objects), <code>library.js</code> (library)</td></tr>
+  <tr><td><code>lib/</code></td><td>three.js with Draco and KTX2 decoders (works offline)</td></tr>
+  <tr><td><code>help/</code></td><td>this help (plain HTML)</td></tr>
+  <tr><td><code>list.php</code></td><td>library listing for hosting with PHP</td></tr>
+  <tr><td><code>tools/build-manifest.py</code></td><td>lists and thumbnails for hosting without PHP</td></tr>
+  <tr><td><code>panoramas/</code>, <code>photos/</code>, <code>models/</code></td><td>your images, depth maps, scenes and models</td></tr>
+  <tr><td><code>.htaccess</code></td><td>optional Apache settings (file types, caching)</td></tr>
+</table>
+<p style="margin-top:28px"><a href="#top">↑ Back to top</a></p>

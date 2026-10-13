@@ -1,0 +1,29 @@
+name: Checks
+on: [push, pull_request]
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: JavaScript syntax
+        run: for f in web/js/*.js; do node --check "$f"; done
+      - name: Python
+        run: |
+          pip install pyflakes fastapi uvicorn python-multipart pillow numpy scipy httpx
+          python -m pyflakes server/nomono3d_server web/tools/build-manifest.py
+          python -m compileall -q server web/tools
+      - name: Server smoke test (no models)
+        run: |
+          PYTHONPATH=server python -m nomono3d_server --no-models --port 8000 &
+          sleep 4
+          curl -fsS localhost:8000/api/health
+          curl -fsS localhost:8000/api/list > /dev/null
+          curl -fsS localhost:8000/ > /dev/null
+      - name: PHP lint
+        run: php -l web/list.php

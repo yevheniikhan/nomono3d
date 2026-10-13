@@ -1,0 +1,31 @@
+{
+ "generated": "tools/build-manifest.py",
+ "items": [
+  {
+   "src": "Demo/atrium-photo.jpg",
+   "title": "Gallery corridor",
+   "description": "Rendered photo with an exact depth map: columns in front, a long corridor behind.",
+   "order": 1,
+   "kind": "photo",
+   "w": 2400,
+   "h": 1600,
+   "size": 194689,
+   "album": "Demo",
+   "depth": "Demo/atrium-photo_depth.png",
+   "thumb": "thumbs/Demo/atrium-photo.jpg"
+  },
+  {
+   "src": "Demo/atrium-portrait.jpg",
+   "title": "Tree by the window",
+   "description": "Rendered portrait photo with an exact depth map.",
+   "order": 2,
+   "kind": "photo",
+   "w": 1600,
+   "h": 2000,
+   "size": 360789,
+   "album": "Demo",
+   "depth": "Demo/atrium-portrait_depth.png",
+   "thumb": "thumbs/Demo/atrium-portrait.jpg"
+  }
+ ]
+}

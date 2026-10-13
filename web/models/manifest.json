@@ -1,0 +1,18 @@
+{
+ "items": [
+  {
+   "src": "demo-tree.glb",
+   "title": "Demo tree",
+   "ext": "glb",
+   "size": 118968,
+   "album": ""
+  },
+  {
+   "src": "sculpture.glb",
+   "title": "Sculpture",
+   "ext": "glb",
+   "size": 188740,
+   "album": ""
+  }
+ ]
+}
